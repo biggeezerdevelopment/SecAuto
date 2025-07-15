@@ -1,0 +1,316 @@
+# SecAuto Configuration File
+
+# Server Configuration
+server:
+  port: 8080
+  host: "localhost"
+  workers: 5
+  read_timeout: "30s"
+  write_timeout: "30s"
+  idle_timeout: "60s"
+  max_header_bytes: 1048576
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  destination: "both"
+  file: "logs/secauto.log"
+  rotation:
+    max_size_mb: 10
+    max_backups: 5
+    max_age_days: 30
+    compress: true
+  format: "json"
+  include_timestamp: true
+  include_component: true
+  include_request_id: true
+
+# Database Configuration (Redis)
+database:
+  redis_url: "redis://localhost:6379/0"
+
+# Cluster Configuration
+cluster:
+  enabled: false
+  redis_url: "redis://localhost:6379/1"
+  redis_db: 1
+  redis_password: ""
+  redis_pool_size: 10
+  redis_pool_timeout: "5s"
+  redis_idle_timeout: "240s"
+  node_id: "node-1"
+  cluster_name: "secauto-cluster"
+  heartbeat_interval: 30
+  election_timeout: 300
+  job_timeout: 3600
+  max_retries: 3
+  retry_delay: 5
+  load_balancing: "round_robin"
+  health_check_interval: 60
+  failover_enabled: true
+
+# Scheduler Configuration
+scheduler:
+  enabled: true
+  max_concurrent_jobs: 10
+  cleanup_interval: 3600
+  retention_days: 30
+  timezone: "UTC"
+  default_timeout: 3600
+  max_schedules: 100
+  schedule_cleanup_interval: 86400
+  failed_job_retention: 7
+  successful_job_retention: 30
+
+# Plugins Configuration
+plugins:
+  enabled: true
+  directory: "../plugins"
+  hot_reload: true
+  reload_interval: 30
+  supported_types: ["python", "go", "executable"]
+  max_plugins: 100
+  plugin_timeout: 300
+  sandbox_mode: true
+  allow_executables: true
+  allow_python: true
+  allow_go_plugins: true
+  plugin_validation: true
+  plugin_logging: true
+  platforms:
+    windows:
+      enabled: true
+      directory: "../plugins/windows"
+      supported_extensions: [".exe", ".ps1", ".bat", ".py"]
+      timeout: 300
+      sandbox_mode: true
+      interpreter: "powershell"
+      build_mode: "native"
+      max_memory: 512
+      allow_network_access: true
+      allow_file_access: true
+    linux:
+      enabled: true
+      directory: "../plugins/linux"
+      supported_extensions: [".sh", ".py", ".go"]
+      timeout: 300
+      sandbox_mode: true
+      interpreter: "bash"
+      build_mode: "native"
+      max_memory: 512
+      allow_network_access: true
+      allow_file_access: true
+    python:
+      enabled: true
+      directory: "../plugins/python"
+      supported_extensions: [".py"]
+      timeout: 300
+      sandbox_mode: false
+      interpreter: "../Venv/Scripts/python.exe"
+      max_memory: 512
+      allow_network_access: true
+      allow_file_access: true
+    go:
+      enabled: true
+      directory: "../plugins/go"
+      supported_extensions: [".so", ".exe", ".go"]
+      timeout: 300
+      sandbox_mode: false
+      build_mode: "plugin"
+      max_memory: 1024
+      allow_network_access: true
+      allow_file_access: true
+
+# Security Configuration
+security:
+  api_keys:
+    - "secauto-api-key-2024-07-14"
+    - "another-api-key-if-needed"
+  integration_encryption_key: "your-secure-encryption-key-for-integrations"
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+    burst_limit: 20
+    window_size: "1m"
+    endpoints:
+      health: 1000
+      playbook: 50
+      playbook_async: 30
+      jobs: 100
+      job_status: 200
+      job_stats: 60
+      job_metrics: 60
+      context: 100
+      webhooks: 50
+      plugins: 50
+      cluster: 30
+      schedules: 30
+      default: 100
+  input_validation:
+    enabled: true
+    max_context_size: 1048576
+    max_playbook_size: 1048576
+    max_script_size: 1048576
+    allowed_script_extensions: [".py", ".js", ".sh", ".ps1"]
+    sanitize_inputs: true
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-API-Key"]
+    max_age: 86400
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    min_version: "1.2"
+
+# Webhooks Configuration
+webhooks:
+  enabled: true
+  timeout: 30
+  retry_count: 3
+  retry_delay: 5
+  max_webhooks: 50
+  events:
+    - "job_completed"
+    - "job_failed"
+    - "playbook_executed"
+    - "automation_uploaded"
+    - "plugin_executed"
+  default_headers:
+    Content-Type: "application/json"
+    User-Agent: "SecAuto/1.0"
+
+# Python Configuration
+python:
+  venv_path: "../Venv"
+  scripts_path: "../automations"
+  playbooks_path: "../playbooks"
+  default_script: "default_automation.py"
+  script_timeout: 300
+  max_script_memory: 512
+  allow_network_access: true
+  allow_file_access: true
+  sandbox_mode: true
+  hot_reload: true
+  script_validation: true
+
+# Rules Engine Configuration
+rules_engine:
+  max_nesting_depth: 10
+  max_conditions_per_rule: 50
+  max_variables_per_context: 1000
+  enable_debug_mode: false
+  strict_mode: true
+  allow_custom_functions: true
+  max_execution_time: 300
+  memory_limit: 512
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  metrics_interval: 60
+  health_check_interval: 30
+  performance_tracking: true
+  slow_query_threshold: 1000
+  memory_usage_tracking: true
+  cpu_usage_tracking: true
+  disk_usage_tracking: true
+  custom_metrics: true
+
+# Performance Configuration
+performance:
+  worker_pool_size: 10
+  job_queue_size: 1000
+  context_cache_size: 1000
+  plugin_cache_size: 100
+  schedule_cache_size: 100
+  webhook_queue_size: 100
+  max_concurrent_requests: 100
+  request_timeout: 30
+  enable_compression: true
+  enable_caching: true
+  cache_ttl: 300
+
+# Development Configuration
+development:
+  debug_mode: false
+  verbose_logging: false
+  hot_reload_enabled: true
+  auto_restart: false
+  profile_enabled: false
+  trace_enabled: false
+  mock_external_services: false
+  test_mode: false
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention_days: 30
+  compression: true
+  encryption: true
+  encryption_key: "your-backup-encryption-key"
+  backup_location: "../backups"
+  include_logs: true
+  include_config: true
+  include_plugins: true
+  max_backup_size: 104857600
+
+# Notifications Configuration
+notifications:
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_address: "secauto@company.com"
+    to_addresses: ["admin@company.com"]
+  slack:
+    enabled: false
+    webhook_url: ""
+    channel: "#security"
+    username: "SecAuto Bot"
+  teams:
+    enabled: false
+    webhook_url: ""
+  discord:
+    enabled: false
+    webhook_url: ""
+
+# Integrations Configuration
+integrations:
+  external_apis:
+    max_connections: 100
+    timeout: 30
+    retry_count: 3
+    retry_delay: 5
+  file_systems:
+    allowed_paths: ["../data", "../logs", "../backups"]
+    max_file_size: 10485760
+    allowed_extensions: [".json", ".yaml", ".yml", ".txt", ".log"]
+  network:
+    allowed_hosts: ["*"]
+    blocked_hosts: []
+    max_connections: 100
+    connection_timeout: 30
+
+# Environment-specific configurations
+environments:
+  development:
+    logging:
+      level: "DEBUG"
+    development:
+      debug_mode: true
+      verbose_logging: true
+  production:
+    logging:
+      level: "WARNING"
+    security:
+      rate_limiting:
+        requests_per_minute: 50
+    development:
+      debug_mode: false
+      verbose_logging: false 

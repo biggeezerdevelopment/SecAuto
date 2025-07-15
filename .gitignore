@@ -1,0 +1,52 @@
+# Virtual Environment
+Venv/
+venv/
+env/
+ENV/
+.env/
+.venv/
+.cursor
+.json
+# Project specific
+phishing_pot/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+data/
+# Model files
+*.gguf
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local 
