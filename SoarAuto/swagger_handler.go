@@ -12,9 +12,9 @@ type SwaggerUIHandler struct {
 }
 
 // NewSwaggerUIHandler creates a new Swagger UI handler
-func NewSwaggerUIHandler() (*SwaggerUIHandler, error) {
-	// Read the OpenAPI specification
-	spec, err := readOpenAPISpec()
+func NewSwaggerUIHandler(serverPort string) (*SwaggerUIHandler, error) {
+	// Read the OpenAPI specification with dynamic server URL
+	spec, err := readOpenAPISpec(serverPort)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read OpenAPI spec: %w", err)
 	}
@@ -50,7 +50,10 @@ func (h *SwaggerUIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // serveSwaggerUI serves the main Swagger UI page
 func (h *SwaggerUIHandler) serveSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	html := `<!DOCTYPE html>
+	// Get the current server URL from the request
+	serverURL := fmt.Sprintf("http://%s", r.Host)
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -102,7 +105,7 @@ func (h *SwaggerUIHandler) serveSwaggerUI(w http.ResponseWriter, r *http.Request
     <script>
         window.onload = function() {
             const ui = SwaggerUIBundle({
-                url: '/api-docs',
+                url: '%s/api-docs',
                 dom_id: '#swagger-ui',
                 deepLinking: true,
                 presets: [
@@ -124,14 +127,14 @@ func (h *SwaggerUIHandler) serveSwaggerUI(w http.ResponseWriter, r *http.Request
         };
     </script>
 </body>
-</html>`
+</html>`, serverURL)
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
 }
 
 // readOpenAPISpec reads the OpenAPI specification from file
-func readOpenAPISpec() ([]byte, error) {
+func readOpenAPISpec(serverPort string) ([]byte, error) {
 	// For now, we'll return a basic spec
 	// In a real implementation, you would read from openapi.yaml
 	spec := map[string]interface{}{
@@ -151,7 +154,7 @@ func readOpenAPISpec() ([]byte, error) {
 		},
 		"servers": []map[string]interface{}{
 			{
-				"url":         "http://localhost:8080",
+				"url":         fmt.Sprintf("http://localhost:%s", serverPort),
 				"description": "Development server",
 			},
 		},

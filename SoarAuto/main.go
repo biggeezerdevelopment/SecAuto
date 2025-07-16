@@ -33,7 +33,7 @@ func main() {
 	standalone := flag.Bool("s", false, "Run in standalone mode")
 	contextFile := flag.String("c", "", "Context JSON file path")
 	playbookFile := flag.String("p", "", "Playbook JSON file path")
-	port := flag.String("port", "8080", "Server port (for server mode)")
+	port := flag.String("port", "8000", "Server port (for server mode)")
 	workers := flag.Int("workers", 5, "Number of worker threads for async jobs")
 	logLevel := flag.String("log-level", "INFO", "Log level (DEBUG, INFO, WARNING, ERROR)")
 	// logDest and logFile are no longer needed as variables
@@ -155,7 +155,7 @@ func runServer(port string, workerCount int) {
 	}
 
 	// Initialize Swagger UI handler
-	swaggerHandler, err := NewSwaggerUIHandler()
+	swaggerHandler, err := NewSwaggerUIHandler(serverPort)
 	if err != nil {
 		log.Fatalf("Failed to initialize Swagger UI handler: %v", err)
 	}
@@ -189,43 +189,55 @@ func runServer(port string, workerCount int) {
 		integrationConfigManager: integrationConfigManager,
 	}
 
-	// Set up routes with logging, validation, rate limiting, and auth middleware
-	http.HandleFunc("/health", loggingMiddleware(server.healthHandler))
-	http.HandleFunc("/playbook", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookHandler)))))
-	http.HandleFunc("/playbook/async", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookAsyncHandler)))))
-	http.HandleFunc("/jobs", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobsHandler)))))
-	http.HandleFunc("/jobs/stats", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobStatsHandler)))))
-	http.HandleFunc("/jobs/metrics", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobMetricsHandler)))))
-	http.HandleFunc("/plugins", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginsHandler)))))
-	http.HandleFunc("/plugins/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginHandler)))))
-	http.HandleFunc("/cluster", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterHandler)))))
-	http.HandleFunc("/cluster/jobs", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterJobsHandler)))))
-	http.HandleFunc("/cluster/jobs/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterJobHandler)))))
-	http.HandleFunc("/schedules", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.schedulesHandler)))))
-	http.HandleFunc("/schedules/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.scheduleHandler)))))
-	http.HandleFunc("/job/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobHandler)))))
-	http.HandleFunc("/context", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.contextHandler)))))
-	http.HandleFunc("/webhooks", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.webhooksHandler)))))
-	http.HandleFunc("/validate", loggingMiddleware(validationMiddleware(validator)(server.validateHandler)))
-	http.HandleFunc("/automation", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationUploadHandler)))))
-	http.HandleFunc("/playbook/upload", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookUploadHandler)))))
-	http.HandleFunc("/playbooks", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookListHandler)))))
-	http.HandleFunc("/automations", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationListHandler)))))
-	http.HandleFunc("/automation/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationDeleteHandler)))))
-	http.HandleFunc("/playbook/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookDeleteHandler)))))
-	http.HandleFunc("/plugin/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginUploadHandler)))))
-	http.HandleFunc("/plugin/delete/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginDeleteHandler)))))
+	// Create CORS middleware
+	corsMiddleware := corsMiddleware(config)
+
+	// Set up routes with CORS, logging, validation, rate limiting, and auth middleware
+	http.HandleFunc("/health", corsMiddleware(loggingMiddleware(server.healthHandler)))
+	http.HandleFunc("/playbook", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookHandler))))))
+	http.HandleFunc("/playbook/async", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookAsyncHandler))))))
+	http.HandleFunc("/jobs", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobsHandler))))))
+	http.HandleFunc("/jobs/stats", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobStatsHandler))))))
+	http.HandleFunc("/jobs/metrics", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobMetricsHandler))))))
+	http.HandleFunc("/plugins", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginsHandler))))))
+	http.HandleFunc("/plugins/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginHandler))))))
+	http.HandleFunc("/cluster", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterHandler))))))
+	http.HandleFunc("/cluster/jobs", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterJobsHandler))))))
+	http.HandleFunc("/cluster/jobs/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clusterJobHandler))))))
+	http.HandleFunc("/schedules", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.schedulesHandler))))))
+	http.HandleFunc("/schedules/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.scheduleHandler))))))
+	http.HandleFunc("/job/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.jobHandler))))))
+	http.HandleFunc("/context", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.contextHandler))))))
+	http.HandleFunc("/webhooks", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.webhooksHandler))))))
+	http.HandleFunc("/validate", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(server.validateHandler))))
+	http.HandleFunc("/automation", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationUploadHandler))))))
+	http.HandleFunc("/playbook/upload", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookUploadHandler))))))
+	http.HandleFunc("/playbooks", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookListHandler))))))
+	http.HandleFunc("/automations", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationListHandler))))))
+	http.HandleFunc("/automation/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationDeleteHandler))))))
+	http.HandleFunc("/playbook/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.playbookDeleteHandler))))))
+	http.HandleFunc("/plugin/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginUploadHandler))))))
+	http.HandleFunc("/plugin/delete/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.pluginDeleteHandler))))))
 
 	// Integration configuration endpoints
-	http.HandleFunc("/integrations", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationsHandler)))))
-	http.HandleFunc("/integrations/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationHandler)))))
-	http.HandleFunc("/integrations/upload", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationUploadHandler)))))
-	http.HandleFunc("/integrations/delete/", loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationDeleteHandler)))))
+	http.HandleFunc("/integrations", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationsHandler))))))
+	http.HandleFunc("/integrations/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationHandler))))))
+	http.HandleFunc("/integrations/upload", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationUploadHandler))))))
+	http.HandleFunc("/integrations/delete/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationDeleteHandler))))))
 
-	// Swagger UI documentation routes (no auth required)
-	http.HandleFunc("/docs", swaggerHandler.ServeHTTP)
-	http.HandleFunc("/docs/", swaggerHandler.ServeHTTP)
-	http.HandleFunc("/api-docs", swaggerHandler.ServeHTTP)
+	// Swagger UI documentation routes (no auth required, but with CORS)
+	http.HandleFunc("/docs", corsMiddleware(swaggerHandler.ServeHTTP))
+	http.HandleFunc("/docs/", corsMiddleware(swaggerHandler.ServeHTTP))
+	http.HandleFunc("/api-docs", corsMiddleware(swaggerHandler.ServeHTTP))
+
+	// Global OPTIONS handler for CORS preflight requests
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "OPTIONS" {
+			corsPreflightHandler(config)(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	// Start server
 	logger.Info("SecAuto Server starting", map[string]interface{}{

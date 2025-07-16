@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecAuto CORS Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>SecAuto CORS Test</h1>
+    <p>This page tests CORS functionality with your SecAuto server.</p>
+
+    <div class="test-section">
+        <h3>1. Health Check (No Auth Required)</h3>
+        <button onclick="testHealth()">Test Health Endpoint</button>
+        <div id="health-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>2. API Key Test (Auth Required)</h3>
+        <input type="text" id="api-key" placeholder="Enter API Key" value="secauto-api-key-2024-07-14" style="width: 300px; padding: 5px;">
+        <button onclick="testWithAuth()">Test with API Key</button>
+        <div id="auth-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>3. Preflight Test</h3>
+        <button onclick="testPreflight()">Test OPTIONS Preflight</button>
+        <div id="preflight-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>4. Swagger UI Test</h3>
+        <button onclick="testSwagger()">Test Swagger UI</button>
+        <div id="swagger-result"></div>
+    </div>
+
+    <script>
+        // Get the current server URL dynamically
+        const SERVER_URL = window.location.protocol + '//' + window.location.host;
+
+        function displayResult(elementId, success, message, data = null) {
+            const element = document.getElementById(elementId);
+            element.className = success ? 'success' : 'error';
+            element.innerHTML = `
+                <h4>${success ? '✅ Success' : '❌ Error'}</h4>
+                <p>${message}</p>
+                ${data ? `<pre>${JSON.stringify(data, null, 2)}</pre>` : ''}
+            `;
+        }
+
+        async function testHealth() {
+            try {
+                const response = await fetch(`${SERVER_URL}/health`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResult('health-result', true, 'Health check successful', data);
+                } else {
+                    displayResult('health-result', false, `Health check failed: ${response.status}`, data);
+                }
+            } catch (error) {
+                displayResult('health-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        async function testWithAuth() {
+            const apiKey = document.getElementById('api-key').value;
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/jobs`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': apiKey
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResult('auth-result', true, 'Authenticated request successful', data);
+                } else {
+                    displayResult('auth-result', false, `Authentication failed: ${response.status}`, data);
+                }
+            } catch (error) {
+                displayResult('auth-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        async function testPreflight() {
+            try {
+                const response = await fetch(`${SERVER_URL}/jobs`, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Access-Control-Request-Method': 'GET',
+                        'Access-Control-Request-Headers': 'Content-Type, X-API-Key'
+                    }
+                });
+
+                const corsHeaders = {
+                    'Access-Control-Allow-Origin': response.headers.get('Access-Control-Allow-Origin'),
+                    'Access-Control-Allow-Methods': response.headers.get('Access-Control-Allow-Methods'),
+                    'Access-Control-Allow-Headers': response.headers.get('Access-Control-Allow-Headers'),
+                    'Access-Control-Max-Age': response.headers.get('Access-Control-Max-Age')
+                };
+
+                if (response.status === 200) {
+                    displayResult('preflight-result', true, 'Preflight request successful', corsHeaders);
+                } else {
+                    displayResult('preflight-result', false, `Preflight failed: ${response.status}`, corsHeaders);
+                }
+            } catch (error) {
+                displayResult('preflight-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        async function testSwagger() {
+            try {
+                const response = await fetch(`${SERVER_URL}/docs`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'text/html'
+                    }
+                });
+
+                if (response.ok) {
+                    displayResult('swagger-result', true, 'Swagger UI accessible');
+                } else {
+                    displayResult('swagger-result', false, `Swagger UI failed: ${response.status}`);
+                }
+            } catch (error) {
+                displayResult('swagger-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        // Auto-test on page load
+        window.onload = function() {
+            setTimeout(testHealth, 1000);
+        };
+    </script>
+</body>
+</html> 

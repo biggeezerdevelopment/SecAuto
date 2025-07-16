@@ -112,7 +112,7 @@ func NewClusterManager(config *ClusterConfig, server *SecAutoServer) (*ClusterMa
 	// Parse port from string to int
 	port, err := strconv.Atoi(server.port)
 	if err != nil {
-		port = 8080 // Default port if parsing fails
+		port = 8000 // Default port if parsing fails
 	}
 
 	// Create node info

@@ -381,7 +381,7 @@ type NetworkConfig struct {
 func LoadConfig(configPath string) (*Config, error) {
 	defaults := &Config{
 		Server: ServerConfig{
-			Port:           8080,
+			Port:           8000,
 			Host:           "localhost",
 			Workers:        5,
 			ReadTimeout:    "30s",

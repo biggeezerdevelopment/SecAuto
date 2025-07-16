@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swagger UI Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        iframe {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Swagger UI Test</h1>
+    <p>This page tests Swagger UI functionality with dynamic server URL.</p>
+
+    <div class="test-section">
+        <h3>1. API Documentation Test</h3>
+        <button onclick="testAPIDocs()">Test API Docs Endpoint</button>
+        <div id="api-docs-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>2. Swagger UI Test</h3>
+        <button onclick="testSwaggerUI()">Test Swagger UI</button>
+        <div id="swagger-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>3. Embedded Swagger UI</h3>
+        <p>If the tests above pass, you should see the Swagger UI below:</p>
+        <iframe id="swagger-iframe" src="/docs"></iframe>
+    </div>
+
+    <script>
+        // Get the current server URL dynamically
+        const SERVER_URL = window.location.protocol + '//' + window.location.host;
+
+        function displayResult(elementId, success, message, data = null) {
+            const element = document.getElementById(elementId);
+            element.className = success ? 'success' : 'error';
+            element.innerHTML = `
+                <h4>${success ? '✅ Success' : '❌ Error'}</h4>
+                <p>${message}</p>
+                ${data ? `<pre>${JSON.stringify(data, null, 2)}</pre>` : ''}
+            `;
+        }
+
+        async function testAPIDocs() {
+            try {
+                const response = await fetch(`${SERVER_URL}/api-docs`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    displayResult('api-docs-result', true, 'API documentation loaded successfully', {
+                        title: data.info?.title,
+                        version: data.info?.version,
+                        servers: data.servers
+                    });
+                } else {
+                    displayResult('api-docs-result', false, `API docs failed: ${response.status}`, data);
+                }
+            } catch (error) {
+                displayResult('api-docs-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        async function testSwaggerUI() {
+            try {
+                const response = await fetch(`${SERVER_URL}/docs`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'text/html'
+                    }
+                });
+
+                if (response.ok) {
+                    displayResult('swagger-result', true, 'Swagger UI accessible');
+                    // Reload the iframe
+                    document.getElementById('swagger-iframe').src = '/docs';
+                } else {
+                    displayResult('swagger-result', false, `Swagger UI failed: ${response.status}`);
+                }
+            } catch (error) {
+                displayResult('swagger-result', false, `Network error: ${error.message}`);
+            }
+        }
+
+        // Auto-test on page load
+        window.onload = function() {
+            setTimeout(testAPIDocs, 1000);
+            setTimeout(testSwaggerUI, 2000);
+        };
+    </script>
+</body>
+</html> 

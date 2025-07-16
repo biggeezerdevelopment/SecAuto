@@ -80,7 +80,7 @@ func setEnvironmentVariablesForIntegrations(config *Config) {
 	}
 	port := config.Server.Port
 	if port == 0 {
-		port = 8080
+		port = 8000 // Use 8000 as default instead of 8080
 	}
 
 	secautoURL := fmt.Sprintf("http://%s:%d", host, port)
