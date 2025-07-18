@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // RuleEngine represents the SOAR rules engine
@@ -333,7 +334,7 @@ func (re *RuleEngine) evaluateRunOperation(scriptName interface{}, operation map
 	})
 
 	// Pass the processed context to Python scripts
-	outputBytes, err := RunPythonFromVenvWithJSON(re.config.GetVenvPath(), scriptPath, processedData)
+	outputBytes, err := RunPythonFromVenvWithJSONSeparateOutput(re.config.GetVenvPath(), scriptPath, processedData)
 	if err != nil {
 		logger.Error("Python script execution failed", map[string]interface{}{
 			"component": "rules_engine",
@@ -346,13 +347,20 @@ func (re *RuleEngine) evaluateRunOperation(scriptName interface{}, operation map
 	// Parse the raw JSON output from the Python script
 	var resultData map[string]interface{}
 	if err := json.Unmarshal(outputBytes, &resultData); err != nil {
-		logger.Error("Failed to parse Python script output", map[string]interface{}{
-			"component": "rules_engine",
-			"script":    scriptNameStr,
-			"error":     err.Error(),
-			"output":    string(outputBytes),
-		})
-		return nil, fmt.Errorf("failed to parse Python script output: %v", err)
+		// Try to clean the output by removing any non-JSON content
+		outputStr := string(outputBytes)
+		cleanedOutput := cleanPythonOutput(outputStr)
+
+		if err := json.Unmarshal([]byte(cleanedOutput), &resultData); err != nil {
+			logger.Error("Failed to parse Python script output", map[string]interface{}{
+				"component": "rules_engine",
+				"script":    scriptNameStr,
+				"error":     err.Error(),
+				"output":    string(outputBytes),
+				"cleaned":   cleanedOutput,
+			})
+			return nil, fmt.Errorf("failed to parse Python script output: %v", err)
+		}
 	}
 
 	logger.Debug("Python script output structure", map[string]interface{}{
@@ -1257,4 +1265,31 @@ func (re *RuleEngine) processStringTemplate(template string, data map[string]int
 		})
 		return match
 	})
+}
+
+// cleanPythonOutput attempts to extract valid JSON from Python script output
+func cleanPythonOutput(output string) string {
+	// Remove leading/trailing whitespace
+	output = strings.TrimSpace(output)
+
+	// Find the first '{' and last '}' to extract JSON
+	start := strings.Index(output, "{")
+	end := strings.LastIndex(output, "}")
+
+	if start != -1 && end != -1 && end > start {
+		jsonPart := output[start : end+1]
+
+		// Remove any non-printable characters that might interfere
+		var cleaned strings.Builder
+		for _, r := range jsonPart {
+			if unicode.IsPrint(r) || unicode.IsSpace(r) {
+				cleaned.WriteRune(r)
+			}
+		}
+
+		return cleaned.String()
+	}
+
+	// If no JSON braces found, return original output
+	return output
 }

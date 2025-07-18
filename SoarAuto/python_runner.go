@@ -129,7 +129,7 @@ func RunPythonCodeFromVenvWithJSON(venvPath, pythonCode string, jsonInput interf
 	return output, nil
 }
 
-// RunPythonFromVenvStdoutOnly runs a Python script and returns only stdout (stderr is ignored)
+// Run PythonFromVenvStdoutOnly runs a Python script and returns only stdout (stderr is ignored)
 func RunPythonFromVenvStdoutOnly(venvPath, scriptPath string, args ...string) ([]byte, error) {
 	var pythonExe string
 	if runtime.GOOS == "windows" {
@@ -166,4 +166,82 @@ func RunPythonFromVenvStdoutOnly(venvPath, scriptPath string, args ...string) ([
 	}
 
 	return output, nil
+}
+
+// Run Python script with JSON input via stdin and separate stdout/stderr
+func RunPythonFromVenvWithJSONSeparateOutput(venvPath, scriptPath string, jsonInput interface{}, args ...string) ([]byte, error) {
+	var pythonExe string
+	if runtime.GOOS == "windows" {
+		pythonExe = filepath.Join(venvPath, "Scripts", "python.exe")
+	} else {
+		pythonExe = filepath.Join(venvPath, "bin", "python")
+	}
+	cmdArgs := append([]string{scriptPath}, args...)
+	cmd := exec.Command(pythonExe, cmdArgs...)
+
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %v", err)
+	}
+
+	if jsonInput != nil {
+		jsonBytes, err := json.Marshal(jsonInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON input: %v", err)
+		}
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create stdin pipe: %v", err)
+		}
+		go func() {
+			defer stdin.Close()
+			stdin.Write(jsonBytes)
+		}()
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start python command: %v", err)
+	}
+
+	// Read stdout and stderr concurrently
+	stdoutChan := make(chan []byte, 1)
+	stderrChan := make(chan []byte, 1)
+
+	go func() {
+		output, _ := io.ReadAll(stdout)
+		stdoutChan <- output
+	}()
+
+	go func() {
+		output, _ := io.ReadAll(stderr)
+		stderrChan <- output
+	}()
+
+	// Wait for command to complete
+	if err := cmd.Wait(); err != nil {
+		stderrOutput := <-stderrChan
+		return nil, fmt.Errorf("python execution failed: %v, stderr: %s", err, string(stderrOutput))
+	}
+
+	// Get stdout output
+	stdoutOutput := <-stdoutChan
+	stderrOutput := <-stderrChan
+
+	// Log stderr output if any (for debugging)
+	if len(stderrOutput) > 0 {
+		logger.Debug("Python script stderr output", map[string]interface{}{
+			"component": "python_runner",
+			"script":    scriptPath,
+			"stderr":    string(stderrOutput),
+		})
+	}
+
+	return stdoutOutput, nil
 }
