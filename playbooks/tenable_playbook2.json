@@ -1,0 +1,13 @@
+[ {
+    "run": "tenableauto",
+    "redis": "redis"
+  },
+  {"if": {
+  "conditions": [
+    [">=",{"var": "redis.value.inactive_users"}, 0]
+  ],
+  "logic": "and",
+  "true": {"run": "baseit5"},
+  "false": {}
+}}
+] 

@@ -1,0 +1,6 @@
+[ 
+  {
+     "run": "qualysauto",
+     "redis": "redis"
+  }
+] 
