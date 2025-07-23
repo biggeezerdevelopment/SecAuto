@@ -3,6 +3,16 @@ import json
 import sys
 import requests
 
+# Try to import urllib3 for SSL warning disable
+try:
+    import urllib3
+    # Disable SSL warnings
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    urllib3.disable_warnings(urllib3.exceptions.NotOpenSSLWarning)
+    urllib3.disable_warnings(urllib3.exceptions.InsecurePlatformWarning)
+except ImportError:
+    print("Warning: urllib3 module not found. SSL warnings may appear.", file=sys.stderr)
+
 def base_context():
     context = {}
     return json.dumps(context)
@@ -116,7 +126,13 @@ def get_secauto_config() -> tuple[str, str]:
         #logger.warning("No SecAuto config found, using defaults")
         return "http://localhost:8080", None
 
-def get_integration_config(integration_name: str) -> tuple[str, str]:         
+def get_integration_config(integration_name: str) -> dict:         
+    # Get configuration
+    secauto_url, secauto_api_key = get_secauto_config()
+    
+    if not secauto_api_key:
+        return None
+        
     headers = {
         "X-API-Key": secauto_api_key,
         "Content-Type": "application/json"

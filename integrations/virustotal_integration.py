@@ -19,17 +19,27 @@ import json
 import requests
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
+import sys
 
+# Try to import urllib3 for SSL warning disable
+try:
+    import urllib3
+    # Disable SSL warnings
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    urllib3.disable_warnings(urllib3.exceptions.NotOpenSSLWarning)
+    urllib3.disable_warnings(urllib3.exceptions.InsecurePlatformWarning)
+except ImportError:
+    print("Warning: urllib3 module not found. SSL warnings may appear.", file=sys.stderr)
 
 try:
     import requests
 except ImportError:
-    print("Warning: requests module not found. Install with: pip install requests")
+    print("Warning: requests module not found. Install with: pip install requests", file=sys.stderr)
 
 try:
     import yaml
 except ImportError:
-    print("Warning: yaml module not found. Install with: pip install pyyaml")
+    print("Warning: yaml module not found. Install with: pip install pyyaml", file=sys.stderr)
 
 class VirusTotalIntegration:
     """VirusTotal integration for SecAuto"""

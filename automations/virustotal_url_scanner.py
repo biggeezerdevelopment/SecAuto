@@ -23,7 +23,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'integrations'))
 
 try:
-    from virustotal_integration import VirusTotalIntegration, scan_url_with_virustotal
+    from virustotal_integration import VirusTotalIntegration
 except ImportError as e:
     # Print error to stderr, not stdout
     import sys
@@ -32,7 +32,7 @@ except ImportError as e:
     sys.exit(1)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 #logger = logging.getLogger(__name__)
 
 def main():
