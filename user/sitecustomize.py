@@ -98,7 +98,6 @@ try:
     builtins.search_context_iterative = SoarBaseAPI.search_context_iterative
     builtins.search_context_path = SoarBaseAPI.search_context_path
     builtins.load_context = SoarBaseAPI.load_context
-    builtins.get_process_update = SoarBaseAPI.get_process_update
     builtins.return_context = SoarBaseAPI.return_context
     builtins.get_secauto_config = SoarBaseAPI.get_secauto_config
     builtins.get_integration_config = SoarBaseAPI.get_integration_config
@@ -116,16 +115,10 @@ try:
             context = json.loads(SoarBaseAPI.base_context())
         return context
     secauto_url, secauto_api_key = get_secauto_config()
-    # Execute context loading immediately and make it globally available
     global_context = _ensure_context_loaded()
     builtins.context = global_context
     builtins.secauto_url = secauto_url
     builtins.secauto_api_key = secauto_api_key
-    
-    # Only log if not being called from Go
-    #if not _is_go_execution():
-    #_log_message("SoarBaseAPI loaded successfully")
-        
     
 except ImportError as e:
     _log_message(f"Warning: Could not import SoarBaseAPI from {server_path}: {e}")

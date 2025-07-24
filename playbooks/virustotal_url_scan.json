@@ -1,6 +1,16 @@
-[ {"run": "data_enrichment"},
+[ 
+{"run": "data_enrichment"},
 {
   "run": "virustotal_url_scanner",
   "urls": "{{threat_intelligence.domains}}"
-}
+},
+{"if": {
+  "conditions": [
+    [">=",{"var": "virustotal.summary.malicious_urls"},3]
+  ],
+  "logic": "and",
+  "false": {"run": "baseit5"},
+  "true": {{"run":"addclient",
+            "client":"guidepoint"}
+}}
 ] 

@@ -193,6 +193,30 @@ func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (i
 			"component": "rules_engine",
 			"array_len": len(v),
 		})
+
+		// Check if this is a comparison operation array (e.g., [">=", {"var": "..."}, 10])
+		if len(v) == 3 {
+			operator, ok1 := v[0].(string)
+			if ok1 {
+				// Check if it's a comparison operator
+				switch operator {
+				case ">", "gt", "<", "lt", ">=", "gte", "<=", "lte", "==", "eq", "!=", "!===":
+					logger.Info("Found comparison operation in array", map[string]interface{}{
+						"component": "rules_engine",
+						"operator":  operator,
+						"operands":  []interface{}{v[1], v[2]},
+					})
+
+					// Convert array format to map format for evaluation
+					operation := map[string]interface{}{
+						operator: []interface{}{v[1], v[2]},
+					}
+					return re.evaluateComparison(operation, operator, data)
+				}
+			}
+		}
+
+		// Handle as regular array
 		var results []interface{}
 		for _, item := range v {
 			result, err := re.evaluate(item, data)
