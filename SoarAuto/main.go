@@ -225,6 +225,10 @@ func runServer(port string, workerCount int) {
 	http.HandleFunc("/integrations/upload", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationUploadHandler))))))
 	http.HandleFunc("/integrations/delete/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationDeleteHandler))))))
 
+	// Redis cache endpoints
+	http.HandleFunc("/cache", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheHandler))))))
+	http.HandleFunc("/cache/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheKeyHandler))))))
+
 	// Swagger UI documentation routes (no auth required, but with CORS)
 	http.HandleFunc("/docs", corsMiddleware(swaggerHandler.ServeHTTP))
 	http.HandleFunc("/docs/", corsMiddleware(swaggerHandler.ServeHTTP))
@@ -285,6 +289,10 @@ func runServer(port string, workerCount int) {
 			{"method": "DELETE", "path": "/integrations/{name}", "description": "Delete an integration by name"},
 			{"method": "POST", "path": "/integrations/upload", "description": "Upload integration Python file"},
 			{"method": "DELETE", "path": "/integrations/delete/{name}", "description": "Delete integration Python file"},
+			{"method": "GET", "path": "/cache", "description": "List cache operations"},
+			{"method": "GET", "path": "/cache/{key}", "description": "Get value from Redis cache"},
+			{"method": "POST", "path": "/cache/{key}", "description": "Set value in Redis cache"},
+			{"method": "DELETE", "path": "/cache/{key}", "description": "Delete value from Redis cache"},
 		},
 	})
 
@@ -3452,4 +3460,161 @@ func (s *SecAutoServer) deleteIntegrationFile(integrationName string) error {
 	}
 
 	return fmt.Errorf("integration '%s' not found", integrationName)
+}
+
+// cacheHandler handles cache operations (GET for listing, general cache info)
+func (s *SecAutoServer) cacheHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		// Return general cache information
+		response := map[string]interface{}{
+			"success": true,
+			"message": "Redis cache is available",
+			"operations": []map[string]string{
+				{"method": "GET", "path": "/cache/{key}", "description": "Get value from cache"},
+				{"method": "POST", "path": "/cache/{key}", "description": "Set value in cache"},
+				{"method": "DELETE", "path": "/cache/{key}", "description": "Delete value from cache"},
+			},
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// cacheKeyHandler handles specific cache key operations
+func (s *SecAutoServer) cacheKeyHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract key from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/cache/")
+	if path == "" {
+		http.Error(w, "Cache key is required", http.StatusBadRequest)
+		return
+	}
+
+	key := path
+
+	logger.Info("Cache operation", map[string]interface{}{
+		"component": "server",
+		"method":    r.Method,
+		"key":       key,
+	})
+
+	switch r.Method {
+	case "GET":
+		s.getCacheValue(w, r, key)
+	case "POST":
+		s.setCacheValue(w, r, key)
+	case "DELETE":
+		s.deleteCacheValue(w, r, key)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// getCacheValue retrieves a value from Redis cache
+func (s *SecAutoServer) getCacheValue(w http.ResponseWriter, r *http.Request, key string) {
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Get value from cache
+	result := redisIntegration.GetCache(key)
+
+	logger.Info("Cache get operation", map[string]interface{}{
+		"component": "server",
+		"key":       key,
+		"success":   result.Success,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// setCacheValue stores a value in Redis cache
+func (s *SecAutoServer) setCacheValue(w http.ResponseWriter, r *http.Request, key string) {
+	// Parse request body
+	var requestBody map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Extract value from request
+	value, exists := requestBody["value"]
+	if !exists {
+		http.Error(w, "Value is required in request body", http.StatusBadRequest)
+		return
+	}
+
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Set value in cache
+	result := redisIntegration.SetCache(key, value)
+
+	logger.Info("Cache set operation", map[string]interface{}{
+		"component": "server",
+		"key":       key,
+		"success":   result.Success,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// deleteCacheValue removes a value from Redis cache
+func (s *SecAutoServer) deleteCacheValue(w http.ResponseWriter, r *http.Request, key string) {
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Delete value from cache
+	result := redisIntegration.DeleteCache(key)
+
+	logger.Info("Cache delete operation", map[string]interface{}{
+		"component": "server",
+		"key":       key,
+		"success":   result.Success,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }

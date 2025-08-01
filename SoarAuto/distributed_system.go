@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // NodeStatus represents the status of a cluster node
@@ -439,7 +439,7 @@ func (dq *DistributedJobQueue) enqueueJob(job *DistributedJob) error {
 
 	// Add to queue with priority
 	score := float64(time.Now().Unix()) + float64(job.Priority)
-	err = dq.redisClient.ZAdd(dq.ctx, dq.queueName, &redis.Z{
+	err = dq.redisClient.ZAdd(dq.ctx, dq.queueName, redis.Z{
 		Score:  score,
 		Member: job.ID,
 	}).Err()

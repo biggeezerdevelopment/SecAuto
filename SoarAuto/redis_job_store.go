@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // RedisJobStore provides persistent storage for jobs using Redis
@@ -61,7 +61,7 @@ func (rjs *RedisJobStore) SaveJob(job *Job) error {
 
 	// Also store in job list for easy querying
 	listKey := "jobs:list"
-	err = rjs.client.ZAdd(rjs.ctx, listKey, &redis.Z{
+	err = rjs.client.ZAdd(rjs.ctx, listKey, redis.Z{
 		Score:  float64(job.CreatedAt.Unix()),
 		Member: job.ID,
 	}).Err()

@@ -1839,6 +1839,264 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 			},
+			"/cache": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Cache Information",
+					"description": "Get general information about the Redis cache system and available operations.",
+					"tags":        []string{"Cache"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Cache information retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"operations": map[string]interface{}{
+												"type": "array",
+												"items": map[string]interface{}{
+													"type": "object",
+													"properties": map[string]interface{}{
+														"method": map[string]interface{}{
+															"type": "string",
+														},
+														"path": map[string]interface{}{
+															"type": "string",
+														},
+														"description": map[string]interface{}{
+															"type": "string",
+														},
+													},
+												},
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			"/cache/{key}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Cache Value",
+					"description": "Retrieve a value from Redis cache by key. Supports automatic JSON deserialization for complex data types.",
+					"tags":        []string{"Cache"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "key",
+							"in":          "path",
+							"required":    true,
+							"description": "Cache key to retrieve",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Cache value retrieved successfully or key not found",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"key": map[string]interface{}{
+												"type": "string",
+											},
+											"value": map[string]interface{}{
+												"description": "The cached value (any JSON type)",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"error_message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Set Cache Value",
+					"description": "Store a value in Redis cache with the specified key. Supports all JSON data types including strings, numbers, objects, and arrays.",
+					"tags":        []string{"Cache"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "key",
+							"in":          "path",
+							"required":    true,
+							"description": "Cache key to set",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type":     "object",
+									"required": []string{"value"},
+									"properties": map[string]interface{}{
+										"value": map[string]interface{}{
+											"description": "The value to cache (any JSON type)",
+											"oneOf": []map[string]interface{}{
+												{"type": "string"},
+												{"type": "number"},
+												{"type": "boolean"},
+												{"type": "object"},
+												{"type": "array"},
+											},
+										},
+									},
+								},
+								"examples": map[string]interface{}{
+									"string_value": map[string]interface{}{
+										"summary": "String Value",
+										"value": map[string]interface{}{
+											"value": "Hello World",
+										},
+									},
+									"object_value": map[string]interface{}{
+										"summary": "Object Value",
+										"value": map[string]interface{}{
+											"value": map[string]interface{}{
+												"user_id":  123,
+												"username": "john_doe",
+												"active":   true,
+												"metadata": map[string]interface{}{"role": "admin"},
+											},
+										},
+									},
+									"array_value": map[string]interface{}{
+										"summary": "Array Value",
+										"value": map[string]interface{}{
+											"value": []interface{}{
+												map[string]interface{}{"id": 1, "name": "Item 1"},
+												map[string]interface{}{"id": 2, "name": "Item 2"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Value stored successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"key": map[string]interface{}{
+												"type": "string",
+											},
+											"value": map[string]interface{}{
+												"description": "The stored value",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request body or missing value",
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete Cache Value",
+					"description": "Remove a value from Redis cache by key.",
+					"tags":        []string{"Cache"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "key",
+							"in":          "path",
+							"required":    true,
+							"description": "Cache key to delete",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Delete operation completed (success or key not found)",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"key": map[string]interface{}{
+												"type": "string",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"error_message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+			},
 		},
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{
@@ -1893,6 +2151,10 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			{
 				"name":        "Integrations",
 				"description": "Integration management endpoints",
+			},
+			{
+				"name":        "Cache",
+				"description": "Redis cache management endpoints",
 			},
 		},
 	}

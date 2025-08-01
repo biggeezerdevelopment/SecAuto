@@ -2,7 +2,7 @@
 
 # Server Configuration
 server:
-  port: 8000
+  port: 8081
   host: "localhost"
   workers: 5
   read_timeout: "30s"
@@ -145,6 +145,7 @@ security:
       plugins: 50
       cluster: 30
       schedules: 30
+      cache: 200
       default: 100
   input_validation:
     enabled: true

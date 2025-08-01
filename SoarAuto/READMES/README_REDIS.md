@@ -361,6 +361,106 @@ spec:
           name: secauto-config
 ```
 
+## Redis Cache API
+
+SecAuto now includes a comprehensive Redis Cache API that allows automations and external applications to store and retrieve data efficiently.
+
+### Cache API Features
+
+- **RESTful Interface**: Simple HTTP endpoints for cache operations
+- **JSON Support**: Automatic serialization/deserialization of complex data
+- **High Performance**: Redis-backed for optimal speed
+- **Authentication**: API key authentication required
+- **Rate Limiting**: Configurable rate limits for cache operations
+
+### Cache API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/cache` | GET | Get cache system information |
+| `/cache/{key}` | GET | Retrieve value from cache |
+| `/cache/{key}` | POST | Store value in cache |
+| `/cache/{key}` | DELETE | Remove value from cache |
+
+### Usage Examples
+
+#### Store Data in Cache
+```bash
+curl -X POST http://localhost:8000/cache/incident-123 \
+  -H "X-API-Key: secauto-api-key-2024-07-14" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "value": {
+      "incident_id": "123",
+      "severity": "high",
+      "status": "investigating",
+      "timestamp": "2025-01-24T12:00:00Z"
+    }
+  }'
+```
+
+#### Retrieve Data from Cache
+```bash
+curl -X GET http://localhost:8000/cache/incident-123 \
+  -H "X-API-Key: secauto-api-key-2024-07-14"
+```
+
+#### Delete Data from Cache
+```bash
+curl -X DELETE http://localhost:8000/cache/incident-123 \
+  -H "X-API-Key: secauto-api-key-2024-07-14"
+```
+
+### Integration with Automations
+
+Automations can use the cache API to:
+- **Share Data**: Pass data between different automation executions
+- **Cache Results**: Store expensive computation results for reuse
+- **State Management**: Maintain state across playbook executions
+- **Rate Limiting**: Track API call timestamps to implement rate limiting
+
+#### Python Example
+```python
+import requests
+import json
+
+# Cache automation results
+def cache_scan_results(scan_id, results):
+    response = requests.post(
+        f"http://localhost:8000/cache/scan-{scan_id}",
+        headers={"X-API-Key": "secauto-api-key-2024-07-14"},
+        json={"value": results}
+    )
+    return response.json()
+
+# Retrieve cached results
+def get_cached_scan(scan_id):
+    response = requests.get(
+        f"http://localhost:8000/cache/scan-{scan_id}",
+        headers={"X-API-Key": "secauto-api-key-2024-07-14"}
+    )
+    data = response.json()
+    return data["value"] if data["success"] else None
+```
+
+### Configuration
+
+Cache API settings are configured in `config.yaml`:
+
+```yaml
+security:
+  rate_limiting:
+    endpoints:
+      cache: 200  # requests per minute for cache operations
+
+database:
+  redis_url: "redis://localhost:6379/0"  # Same Redis instance used for cache
+```
+
+### Documentation
+
+For complete Cache API documentation, see: [CACHE_API_README.md](CACHE_API_README.md)
+
 ## Conclusion
 
-The Redis job store provides a robust, scalable alternative to SQLite with better performance and no deadlock issues. It's particularly well-suited for production environments with high job volumes and distributed deployments. 
+The Redis infrastructure in SecAuto provides both robust job storage and high-performance caching capabilities. The Redis job store eliminates SQLite deadlock issues while the Cache API enables efficient data sharing and state management across automation workflows. This dual-purpose Redis integration makes SecAuto well-suited for production environments with high throughput and complex automation requirements. 

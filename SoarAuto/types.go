@@ -1,5 +1,9 @@
 package main
 
+import (
+	"github.com/redis/go-redis/v9"
+)
+
 // PythonOutput struct to unmarshal JSON output from Python scripts
 type PythonOutput struct {
 	Context  map[string]interface{} `json:"context"`
@@ -218,4 +222,20 @@ type IntegrationDeleteResponse struct {
 	IntegrationName string   `json:"integration_name"`
 	Dependencies    []string `json:"dependencies"`
 	Timestamp       string   `json:"timestamp"`
+}
+
+// RedisIntegration represents a Redis connection for caching
+type RedisIntegration struct {
+	client *redis.Client
+	config *Config
+}
+
+// CacheResponse represents the response from cache operations
+type CacheResponse struct {
+	Success      bool        `json:"success"`
+	Key          string      `json:"key,omitempty"`
+	Value        interface{} `json:"value,omitempty"`
+	Message      string      `json:"message,omitempty"`
+	ErrorMessage string      `json:"error_message,omitempty"`
+	Timestamp    string      `json:"timestamp"`
 }
