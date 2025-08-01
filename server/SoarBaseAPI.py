@@ -153,4 +153,47 @@ def get_integration_config(integration_name: str) -> dict:
                 #logger.debug(f"Request failed for '{integration_name}': {e}")
                 return None
                 
-        
+def set_cache(key: str, value: str) -> Dict[str, Any]:
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.post(
+        f"{secauto_url}/cache/{key}",
+        headers=headers,
+        json=value
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+
+def get_cache(key: str) -> Dict[str, Any]:
+    """Get cache value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.get(
+        f"{secauto_url}/cache/{key}",
+        headers=headers,
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+
+def delete_cache(key: str) -> Dict[str, Any]:
+    """Delete cache value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.delete(
+        f"{secauto_url}/cache/{key}",
+        headers=headers,
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None

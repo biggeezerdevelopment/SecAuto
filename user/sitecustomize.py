@@ -61,6 +61,9 @@ def reload_soar_api():
         builtins.return_context = SoarBaseAPI.return_context
         builtins.get_secauto_config = SoarBaseAPI.get_secauto_config
         builtins.get_integration_config = SoarBaseAPI.get_integration_config
+        builtins.get_cache = SoarBaseAPI.get_cache
+        builtins.set_cache = SoarBaseAPI.set_cache
+        builtins.delete_cache = SoarBaseAPI.delete_cache
         #_log_message(f"SoarBaseAPI reloaded at {time.strftime('%H:%M:%S')}")
         return True
         
@@ -103,6 +106,9 @@ try:
     builtins.get_integration_config = SoarBaseAPI.get_integration_config
     builtins.reload_soar_api = reload_soar_api
     builtins.check_and_reload = check_and_reload
+    builtins.get_cache = SoarBaseAPI.get_cache
+    builtins.set_cache = SoarBaseAPI.set_cache
+    builtins.delete_cache = SoarBaseAPI.delete_cache
     
     # Force context loading in every automation script
     def _ensure_context_loaded():

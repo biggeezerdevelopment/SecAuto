@@ -10,7 +10,8 @@
   ],
   "logic": "and",
   "false": {"run": "baseit5"},
-  "true": {{"run":"addclient",
-            "client":"guidepoint"}
-}}
+  "true": {"run":"addclient",
+           "client":"guidepoint"}
+  }
+}
 ] 
