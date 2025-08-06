@@ -90,3 +90,4 @@ FileSystems settings - No file system restrictions
 Network settings - No network restrictions
 🌍 Environment Configuration
 Environments overrides - No environment-specific configs
+Add Redis Lists for storage of listed items like whitelists, filenames

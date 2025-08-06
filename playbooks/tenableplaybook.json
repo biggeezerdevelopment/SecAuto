@@ -1,6 +1,5 @@
 [ 
   {
-    "run": "tenableauto",
-    "redis": "redis"
+    "run": "tenableauto"
   }
 ] 

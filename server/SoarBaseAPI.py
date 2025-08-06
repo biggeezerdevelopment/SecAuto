@@ -2,6 +2,7 @@ import os
 import json
 import sys
 import requests
+from typing import Dict, Any
 
 # Try to import urllib3 for SSL warning disable
 try:
@@ -158,10 +159,11 @@ def set_cache(key: str, value: str) -> Dict[str, Any]:
         "X-API-Key": secauto_api_key,
         "Content-Type": "application/json"
     }
+    newvalue = {"value": value}
     resp = requests.post(
         f"{secauto_url}/cache/{key}",
         headers=headers,
-        json=value
+        json=newvalue
     )
     if resp.status_code == 200:
         return resp.json()
@@ -197,3 +199,86 @@ def delete_cache(key: str) -> Dict[str, Any]:
         return resp.json()
     else:
         return None
+    
+def get_list(list_name: str) -> Dict[str, Any]:
+    """Get list value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.get(
+        f"{secauto_url}/list/{list_name}",
+        headers=headers,
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+    
+def set_list_array(list_name: str, value: str|list) -> Dict[str, Any]:
+    """Set list value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    if isinstance(value, list): 
+        newvalue = {"items": value}
+    else:
+        newvalue = {"items": [value]}
+    resp = requests.post(
+        f"{secauto_url}/list/{list_name}",
+        headers=headers,
+        json=newvalue
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+    
+def set_list_json(list_name: str, value: dict) -> Dict[str, Any]:
+    """Set list value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    newvalue = {"items": [value]}
+    resp = requests.post(
+        f"{secauto_url}/list/{list_name}",
+        headers=headers,
+        json=newvalue
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+    
+def delete_list(list_name: str) -> Dict[str, Any]:
+    """Delete list value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.delete(
+        f"{secauto_url}/list/{list_name}",
+        headers=headers,
+    )
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+    
+def get_list_item(list_name: str, item_name: str) -> Dict[str, Any]:
+    """Get list item value"""
+    headers = {
+        "X-API-Key": secauto_api_key,
+        "Content-Type": "application/json"
+    }
+    resp = requests.get(
+        f"{secauto_url}/list/{list_name}/{item_name}",
+        headers=headers,
+    )   
+    if resp.status_code == 200:
+        return resp.json()
+    else:
+        return None
+    

@@ -2097,6 +2097,280 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 			},
+			"/lists/{list_name}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get List Items",
+					"description": "Retrieve all items from a Redis list.",
+					"tags":        []string{"Lists"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "list_name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the Redis list",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "List retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"list_name": map[string]interface{}{
+												"type": "string",
+											},
+											"items": map[string]interface{}{
+												"type": "array",
+												"items": map[string]interface{}{
+													"type": "object",
+												},
+											},
+											"count": map[string]interface{}{
+												"type": "integer",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete List",
+					"description": "Delete an entire Redis list.",
+					"tags":        []string{"Lists"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "list_name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the Redis list to delete",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "List deletion completed",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"list_name": map[string]interface{}{
+												"type": "string",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"error_message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+			},
+			"/lists/{list_name}/items": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Add Items to List",
+					"description": "Add items to a Redis list. Items can be added to the left (beginning) or right (end) of the list. Duplicate items are automatically detected and skipped.",
+					"tags":        []string{"Lists"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "list_name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the Redis list",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"description": "Items to add to the list",
+						"required":    true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type":     "object",
+									"required": []string{"items"},
+									"properties": map[string]interface{}{
+										"items": map[string]interface{}{
+											"type":        "array",
+											"description": "Array of items to add to the list",
+											"items": map[string]interface{}{
+												"type": "object",
+											},
+											"minItems": 1,
+										},
+										"position": map[string]interface{}{
+											"type":        "string",
+											"enum":        []string{"left", "right"},
+											"default":     "right",
+											"description": "Position to add items - 'left' (beginning) or 'right' (end)",
+										},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Items added successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"list_name": map[string]interface{}{
+												"type": "string",
+											},
+											"count": map[string]interface{}{
+												"type":        "integer",
+												"description": "Total number of items in list after addition",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request body or parameters",
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Remove Items from List",
+					"description": "Remove specific items from a Redis list. You can specify how many occurrences of each item to remove.",
+					"tags":        []string{"Lists"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "list_name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the Redis list",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"description": "Items to remove from the list",
+						"required":    true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type":     "object",
+									"required": []string{"items"},
+									"properties": map[string]interface{}{
+										"items": map[string]interface{}{
+											"type":        "array",
+											"description": "Array of items to remove from the list",
+											"items": map[string]interface{}{
+												"type": "object",
+											},
+											"minItems": 1,
+										},
+										"count": map[string]interface{}{
+											"type":        "integer",
+											"default":     1,
+											"minimum":     1,
+											"description": "Number of occurrences of each item to remove",
+										},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Items removal completed",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"list_name": map[string]interface{}{
+												"type": "string",
+											},
+											"count": map[string]interface{}{
+												"type":        "integer",
+												"description": "Number of items actually removed",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request body or parameters",
+						},
+						"500": map[string]interface{}{
+							"description": "Redis connection error",
+						},
+					},
+				},
+			},
 		},
 		"components": map[string]interface{}{
 			"securitySchemes": map[string]interface{}{
@@ -2155,6 +2429,10 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			{
 				"name":        "Cache",
 				"description": "Redis cache management endpoints",
+			},
+			{
+				"name":        "Lists",
+				"description": "Redis list management endpoints",
 			},
 		},
 	}

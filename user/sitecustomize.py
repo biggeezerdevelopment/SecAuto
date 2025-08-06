@@ -4,16 +4,27 @@ import os
 import time
 from pathlib import Path
 from importlib import reload
+import urllib3
+
+# Disable SSL warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+urllib3.disable_warnings(urllib3.exceptions.NotOpenSSLWarning)
+urllib3.disable_warnings(urllib3.exceptions.InsecurePlatformWarning)
 
 # Get the workspace root directory (two levels up from site-packages)
-workspace_root = Path(__file__).parent.parent.parent.parent
-server_path = workspace_root / "server"
-soar_api_path = server_path / "SoarBaseAPI.py"
-
+workspace_root = Path(__file__).parent.parent.parent
+workspace_root = Path(__file__).parent.parent.parent
+server_path = f"{workspace_root}/server"
+user_path = f"{workspace_root}/user"
+if str(server_path) not in sys.path:    
+    sys.path.append(server_path)
+if str(user_path) not in sys.path:
+    sys.path.append(user_path)
 
 # Add server directory to Python path
 if str(server_path) not in sys.path:
     sys.path.insert(0, str(server_path))
+    print(f"Added {server_path} to sys.path")
 
 def _log_message(message):
     """Log message to stderr to avoid interfering with stdout JSON output"""
@@ -64,6 +75,13 @@ def reload_soar_api():
         builtins.get_cache = SoarBaseAPI.get_cache
         builtins.set_cache = SoarBaseAPI.set_cache
         builtins.delete_cache = SoarBaseAPI.delete_cache
+        builtins.get_list = SoarBaseAPI.get_list
+        builtins.set_list_array = SoarBaseAPI.set_list_array
+        builtins.set_list_json = SoarBaseAPI.set_list_json
+        builtins.delete_list = SoarBaseAPI.delete_list
+        builtins.get_list_item = SoarBaseAPI.get_list_item
+       
+
         #_log_message(f"SoarBaseAPI reloaded at {time.strftime('%H:%M:%S')}")
         return True
         
@@ -109,6 +127,12 @@ try:
     builtins.get_cache = SoarBaseAPI.get_cache
     builtins.set_cache = SoarBaseAPI.set_cache
     builtins.delete_cache = SoarBaseAPI.delete_cache
+    builtins.get_list = SoarBaseAPI.get_list
+    builtins.set_list_array = SoarBaseAPI.set_list_array
+    builtins.set_list_json = SoarBaseAPI.set_list_json
+    builtins.delete_list = SoarBaseAPI.delete_list
+    builtins.get_list_item = SoarBaseAPI.get_list_item
+   
     
     # Force context loading in every automation script
     def _ensure_context_loaded():
@@ -125,6 +149,6 @@ try:
     builtins.context = global_context
     builtins.secauto_url = secauto_url
     builtins.secauto_api_key = secauto_api_key
-    
+    _log_message(f"Warning: Could not import SoarBaseAPI from {server_path}: {e}")
 except ImportError as e:
     _log_message(f"Warning: Could not import SoarBaseAPI from {server_path}: {e}")

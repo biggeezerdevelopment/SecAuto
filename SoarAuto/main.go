@@ -78,7 +78,14 @@ func main() {
 	}
 	logger = NewStructuredLogger(level, dest, file, rotation)
 
-	runServer(*port, *workers)
+	// Use config port, but allow command line override if needed
+	configPort := strconv.Itoa(config.Server.Port)
+	// Use command line port only if it's different from default
+	if *port != "8000" {
+		runServer(*port, *workers)
+	} else {
+		runServer(configPort, *workers)
+	}
 }
 
 func runServer(port string, workerCount int) {
@@ -91,7 +98,7 @@ func runServer(port string, workerCount int) {
 	// Load API keys from config
 	loadAPIKeysFromConfig(config)
 
-	// Configuration
+	// Use the port passed from main() (which is already from config), with environment variable override
 	serverPort := getEnv("SECAUTO_PORT", port)
 
 	// Create rule engine
@@ -229,6 +236,9 @@ func runServer(port string, workerCount int) {
 	http.HandleFunc("/cache", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheHandler))))))
 	http.HandleFunc("/cache/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheKeyHandler))))))
 
+	// Redis list endpoints
+	http.HandleFunc("/lists/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.listHandler))))))
+
 	// Swagger UI documentation routes (no auth required, but with CORS)
 	http.HandleFunc("/docs", corsMiddleware(swaggerHandler.ServeHTTP))
 	http.HandleFunc("/docs/", corsMiddleware(swaggerHandler.ServeHTTP))
@@ -293,6 +303,10 @@ func runServer(port string, workerCount int) {
 			{"method": "GET", "path": "/cache/{key}", "description": "Get value from Redis cache"},
 			{"method": "POST", "path": "/cache/{key}", "description": "Set value in Redis cache"},
 			{"method": "DELETE", "path": "/cache/{key}", "description": "Delete value from Redis cache"},
+			{"method": "GET", "path": "/lists/{list_name}", "description": "Get all items from Redis list"},
+			{"method": "POST", "path": "/lists/{list_name}/items", "description": "Add items to Redis list"},
+			{"method": "DELETE", "path": "/lists/{list_name}", "description": "Delete entire Redis list"},
+			{"method": "DELETE", "path": "/lists/{list_name}/items", "description": "Remove specific items from Redis list"},
 		},
 	})
 
@@ -3613,6 +3627,220 @@ func (s *SecAutoServer) deleteCacheValue(w http.ResponseWriter, r *http.Request,
 		"component": "server",
 		"key":       key,
 		"success":   result.Success,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// listHandler handles Redis list operations
+func (s *SecAutoServer) listHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse URL path to determine the operation
+	path := strings.TrimPrefix(r.URL.Path, "/lists/")
+	if path == "" {
+		http.Error(w, "List name is required", http.StatusBadRequest)
+		return
+	}
+
+	pathParts := strings.Split(path, "/")
+	listName := pathParts[0]
+
+	logger.Info("List operation", map[string]interface{}{
+		"component":  "server",
+		"method":     r.Method,
+		"list_name":  listName,
+		"path_parts": len(pathParts),
+	})
+
+	// Route based on path structure and method
+	if len(pathParts) == 1 {
+		// Operations on the list itself: /lists/{list_name}
+		switch r.Method {
+		case "GET":
+			s.getListItems(w, r, listName)
+		case "DELETE":
+			s.deleteList(w, r, listName)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	} else if len(pathParts) == 2 && pathParts[1] == "items" {
+		// Operations on list items: /lists/{list_name}/items
+		switch r.Method {
+		case "POST":
+			s.addToList(w, r, listName)
+		case "DELETE":
+			s.removeFromList(w, r, listName)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	} else {
+		http.Error(w, "Invalid list operation path", http.StatusBadRequest)
+	}
+}
+
+// getListItems retrieves all items from a Redis list
+func (s *SecAutoServer) getListItems(w http.ResponseWriter, r *http.Request, listName string) {
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Get list items
+	result := redisIntegration.GetList(listName)
+
+	logger.Info("List get operation", map[string]interface{}{
+		"component": "server",
+		"list_name": listName,
+		"success":   result.Success,
+		"count":     result.Count,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// addToList adds items to a Redis list
+func (s *SecAutoServer) addToList(w http.ResponseWriter, r *http.Request, listName string) {
+	// Parse request body
+	var requestBody ListAddRequest
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if len(requestBody.Items) == 0 {
+		http.Error(w, "Items array is required and cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	// Default position to "right" if not specified
+	position := requestBody.Position
+	if position == "" {
+		position = "right"
+	}
+
+	// Validate position
+	if position != "left" && position != "right" {
+		http.Error(w, "Position must be 'left' or 'right'", http.StatusBadRequest)
+		return
+	}
+
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Add items to list
+	result := redisIntegration.AddToList(listName, requestBody.Items, position)
+
+	logger.Info("List add operation", map[string]interface{}{
+		"component": "server",
+		"list_name": listName,
+		"success":   result.Success,
+		"count":     len(requestBody.Items),
+		"position":  position,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// deleteList deletes an entire Redis list
+func (s *SecAutoServer) deleteList(w http.ResponseWriter, r *http.Request, listName string) {
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Delete list
+	result := redisIntegration.DeleteList(listName)
+
+	logger.Info("List delete operation", map[string]interface{}{
+		"component": "server",
+		"list_name": listName,
+		"success":   result.Success,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// removeFromList removes specific items from a Redis list
+func (s *SecAutoServer) removeFromList(w http.ResponseWriter, r *http.Request, listName string) {
+	// Parse request body
+	var requestBody ListRemoveRequest
+	if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+		http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if len(requestBody.Items) == 0 {
+		http.Error(w, "Items array is required and cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	// Default count to 1 if not specified
+	count := requestBody.Count
+	if count <= 0 {
+		count = 1
+	}
+
+	// Load configuration
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		http.Error(w, "Failed to load configuration", http.StatusInternalServerError)
+		return
+	}
+
+	// Create Redis integration instance
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to connect to Redis: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer redisIntegration.Close()
+
+	// Remove items from list
+	result := redisIntegration.RemoveFromList(listName, requestBody.Items, count)
+
+	logger.Info("List remove operation", map[string]interface{}{
+		"component": "server",
+		"list_name": listName,
+		"success":   result.Success,
+		"count":     count,
+		"items":     len(requestBody.Items),
 	})
 
 	w.Header().Set("Content-Type", "application/json")

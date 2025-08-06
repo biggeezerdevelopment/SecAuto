@@ -239,3 +239,26 @@ type CacheResponse struct {
 	ErrorMessage string      `json:"error_message,omitempty"`
 	Timestamp    string      `json:"timestamp"`
 }
+
+// ListResponse represents the response from Redis list operations
+type ListResponse struct {
+	Success      bool          `json:"success"`
+	ListName     string        `json:"list_name,omitempty"`
+	Items        []interface{} `json:"items,omitempty"`
+	Count        int           `json:"count,omitempty"`
+	Message      string        `json:"message,omitempty"`
+	ErrorMessage string        `json:"error_message,omitempty"`
+	Timestamp    string        `json:"timestamp"`
+}
+
+// ListAddRequest represents the request to add items to a list
+type ListAddRequest struct {
+	Items    []interface{} `json:"items" validate:"required,min=1"`
+	Position string        `json:"position,omitempty"` // "left" or "right", defaults to "right"
+}
+
+// ListRemoveRequest represents the request to remove items from a list
+type ListRemoveRequest struct {
+	Items []interface{} `json:"items" validate:"required,min=1"`
+	Count int           `json:"count,omitempty"` // number of occurrences to remove, defaults to 1
+}

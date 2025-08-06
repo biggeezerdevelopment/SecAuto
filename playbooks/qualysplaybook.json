@@ -1,6 +1,5 @@
 [ 
   {
-     "run": "qualysauto",
-     "redis": "redis"
+     "run": "qualysauto"
   }
 ] 

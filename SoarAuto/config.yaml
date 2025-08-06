@@ -2,7 +2,7 @@
 
 # Server Configuration
 server:
-  port: 8081
+  port: 9090
   host: "localhost"
   workers: 5
   read_timeout: "30s"
