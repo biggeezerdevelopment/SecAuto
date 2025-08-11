@@ -183,6 +183,30 @@ func runServer(port string, workerCount int) {
 		}
 	}
 
+	// Create Redis integration for metadata management
+	redisIntegration, err := NewRedisIntegration(config)
+	if err != nil {
+		log.Fatalf("Failed to create Redis integration: %v", err)
+	}
+
+	// Create automation metadata manager
+	metadataManager := NewAutomationMetadataManager("data/automation_metadata.json", redisIntegration.client)
+
+	// Load metadata from disk and into Redis
+	if err := metadataManager.LoadMetadataFromDisk(); err != nil {
+		logger.Error("Failed to load automation metadata from disk", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
+	}
+
+	if err := metadataManager.LoadMetadataToRedis(); err != nil {
+		logger.Error("Failed to load automation metadata to Redis", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
+	}
+
 	// Create server
 	server := &SecAutoServer{
 		engine:                   engine,
@@ -194,6 +218,7 @@ func runServer(port string, workerCount int) {
 		clusterManager:           clusterManager,
 		jobScheduler:             jobScheduler,
 		integrationConfigManager: integrationConfigManager,
+		metadataManager:          metadataManager,
 	}
 
 	// Create CORS middleware
@@ -242,6 +267,10 @@ func runServer(port string, workerCount int) {
 	// Redis list endpoints
 	http.HandleFunc("/lists/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.listHandler))))))
 
+	// Automation metadata endpoints
+	http.HandleFunc("/automation/metadata", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationMetadataHandler))))))
+	http.HandleFunc("/automation/metadata/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationMetadataItemHandler))))))
+
 	// Swagger UI documentation routes (no auth required, but with CORS)
 	http.HandleFunc("/docs", corsMiddleware(swaggerHandler.ServeHTTP))
 	http.HandleFunc("/docs/", corsMiddleware(swaggerHandler.ServeHTTP))
@@ -281,6 +310,11 @@ func runServer(port string, workerCount int) {
 			{"method": "GET", "path": "/playbooks", "description": "List all playbooks"},
 			{"method": "GET", "path": "/automations", "description": "List all automations"},
 			{"method": "DELETE", "path": "/automation/{name}", "description": "Delete an automation"},
+			{"method": "GET", "path": "/automation/metadata", "description": "List all automation metadata"},
+			{"method": "POST", "path": "/automation/metadata", "description": "Create automation metadata"},
+			{"method": "GET", "path": "/automation/metadata/{name}", "description": "Get automation metadata by name"},
+			{"method": "PUT", "path": "/automation/metadata/{name}", "description": "Update automation metadata by name"},
+			{"method": "DELETE", "path": "/automation/metadata/{name}", "description": "Delete automation metadata by name"},
 			{"method": "GET", "path": "/cluster", "description": "Get cluster information"},
 			{"method": "POST", "path": "/cluster/jobs", "description": "Submit job to distributed queue"},
 			{"method": "GET", "path": "/cluster/jobs/{id}", "description": "Get distributed job status"},
@@ -349,6 +383,14 @@ func runServer(port string, workerCount int) {
 				"error":     err.Error(),
 			})
 		}
+	}
+
+	// Close metadata manager (saves metadata to disk)
+	if err := server.metadataManager.Close(); err != nil {
+		logger.Error("Failed to close metadata manager", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
 	}
 
 	jobManager.Cleanup()
@@ -852,6 +894,19 @@ func (s *SecAutoServer) automationUploadHandler(w http.ResponseWriter, r *http.R
 	}
 	defer file.Close()
 
+	// Parse metadata from form data if provided
+	var metadata *AutomationMetadata
+	if metadataStr := r.FormValue("metadata"); metadataStr != "" {
+		if err := json.Unmarshal([]byte(metadataStr), &metadata); err != nil {
+			logger.Error("Failed to parse automation metadata", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+			http.Error(w, "Invalid metadata format", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Validate file
 	validationResult := s.validateAutomationFile(header, file)
 	if !validationResult.Valid {
@@ -878,6 +933,32 @@ func (s *SecAutoServer) automationUploadHandler(w http.ResponseWriter, r *http.R
 		})
 		http.Error(w, fmt.Sprintf("Failed to save automation: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Save metadata if provided
+	if metadata != nil {
+		// Set the name from the automation file if not provided
+		if metadata.Name == "" {
+			metadata.Name = automationName
+		}
+
+		// Add metadata to the manager
+		if err := s.metadataManager.AddMetadata(*metadata); err != nil {
+			logger.Error("Failed to save automation metadata", map[string]interface{}{
+				"component":  "server",
+				"automation": automationName,
+				"error":      err.Error(),
+			})
+			// Continue with the upload even if metadata saving fails
+		} else {
+			// Reload metadata to Redis
+			if err := s.metadataManager.LoadMetadataToRedis(); err != nil {
+				logger.Error("Failed to reload metadata to Redis", map[string]interface{}{
+					"component": "server",
+					"error":     err.Error(),
+				})
+			}
+		}
 	}
 
 	// Return success response
@@ -2353,6 +2434,24 @@ func (s *SecAutoServer) automationDeleteHandler(w http.ResponseWriter, r *http.R
 		})
 		http.Error(w, fmt.Sprintf("Failed to delete automation: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Also remove metadata for this automation
+	if err := s.metadataManager.RemoveMetadata(automationName); err != nil {
+		logger.Warning("Failed to remove automation metadata", map[string]interface{}{
+			"component":  "server",
+			"automation": automationName,
+			"error":      err.Error(),
+		})
+		// Continue with deletion even if metadata removal fails
+	} else {
+		// Reload metadata to Redis
+		if err := s.metadataManager.LoadMetadataToRedis(); err != nil {
+			logger.Error("Failed to reload metadata to Redis", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+		}
 	}
 
 	// Return success response
@@ -4052,6 +4151,177 @@ func (s *SecAutoServer) handleClientIntegrationsList(w http.ResponseWriter, r *h
 			configCopy := *config
 			configCopy.Name = name // Ensure the name is set correctly
 			response.Integrations = append(response.Integrations, &configCopy)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// automationMetadataHandler handles automation metadata operations
+func (s *SecAutoServer) automationMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// List all automation metadata
+		metadata := s.metadataManager.GetAllMetadata()
+		response := AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata retrieved successfully",
+			Metadata:  metadata,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost:
+		// Create new automation metadata
+		var metadata AutomationMetadata
+		if err := json.NewDecoder(r.Body).Decode(&metadata); err != nil {
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			return
+		}
+
+		if metadata.Name == "" {
+			http.Error(w, "Automation name is required", http.StatusBadRequest)
+			return
+		}
+
+		if err := s.metadataManager.AddMetadata(metadata); err != nil {
+			logger.Error("Failed to add automation metadata", map[string]interface{}{
+				"component": "server",
+				"name":      metadata.Name,
+				"error":     err.Error(),
+			})
+			http.Error(w, fmt.Sprintf("Failed to add metadata: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Reload metadata to Redis
+		if err := s.metadataManager.LoadMetadataToRedis(); err != nil {
+			logger.Error("Failed to reload metadata to Redis", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+		}
+
+		response := AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata added successfully",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// automationMetadataItemHandler handles individual automation metadata operations
+func (s *SecAutoServer) automationMetadataItemHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract automation name from URL path
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+	automationName := pathParts[2]
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get metadata for specific automation
+		metadata, err := s.metadataManager.GetMetadata(automationName)
+		if err != nil {
+			response := AutomationMetadataResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Metadata not found: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata retrieved successfully",
+			Metadata:  []AutomationMetadata{*metadata},
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPut:
+		// Update metadata for specific automation
+		var metadata AutomationMetadata
+		if err := json.NewDecoder(r.Body).Decode(&metadata); err != nil {
+			http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure the name matches the URL
+		metadata.Name = automationName
+
+		if err := s.metadataManager.AddMetadata(metadata); err != nil {
+			logger.Error("Failed to update automation metadata", map[string]interface{}{
+				"component": "server",
+				"name":      metadata.Name,
+				"error":     err.Error(),
+			})
+			http.Error(w, fmt.Sprintf("Failed to update metadata: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Reload metadata to Redis
+		if err := s.metadataManager.LoadMetadataToRedis(); err != nil {
+			logger.Error("Failed to reload metadata to Redis", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+		}
+
+		response := AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata updated successfully",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodDelete:
+		// Delete metadata for specific automation
+		if err := s.metadataManager.RemoveMetadata(automationName); err != nil {
+			response := AutomationMetadataResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to delete metadata: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Reload metadata to Redis
+		if err := s.metadataManager.LoadMetadataToRedis(); err != nil {
+			logger.Error("Failed to reload metadata to Redis", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+		}
+
+		response := AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata deleted successfully",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 
 		w.Header().Set("Content-Type", "application/json")

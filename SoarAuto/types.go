@@ -21,6 +21,7 @@ type SecAutoServer struct {
 	clusterManager           *ClusterManager
 	jobScheduler             *JobScheduler
 	integrationConfigManager *IntegrationConfigManager
+	metadataManager          *AutomationMetadataManager
 }
 
 // JobListResponse represents the response for listing jobs
@@ -261,4 +262,25 @@ type ListAddRequest struct {
 type ListRemoveRequest struct {
 	Items []interface{} `json:"items" validate:"required,min=1"`
 	Count int           `json:"count,omitempty"` // number of occurrences to remove, defaults to 1
+}
+
+// AutomationMetadata represents metadata for an automation script
+type AutomationMetadata struct {
+	Name        string                 `json:"name"`
+	Venv        string                 `json:"venv"`
+	Description string                 `json:"description"`
+	Return      map[string]interface{} `json:"return"`
+}
+
+// AutomationMetadataResponse represents the response for automation metadata operations
+type AutomationMetadataResponse struct {
+	Success   bool                 `json:"success"`
+	Message   string               `json:"message"`
+	Metadata  []AutomationMetadata `json:"metadata,omitempty"`
+	Timestamp string               `json:"timestamp"`
+}
+
+// AutomationUploadRequest represents the request body for automation upload with metadata
+type AutomationUploadRequest struct {
+	Metadata *AutomationMetadata `json:"metadata,omitempty"`
 }

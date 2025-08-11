@@ -394,6 +394,11 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 											"format":      "binary",
 											"description": "Python automation script file (.py)",
 										},
+										"metadata": map[string]interface{}{
+											"type":        "string",
+											"description": "JSON string containing automation metadata (optional)",
+											"example":     `{"name":"script_name","venv":"Venv","return":{"result":"string"}}`,
+										},
 									},
 									"required": []string{"automation"},
 								},
@@ -840,6 +845,189 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 									},
 								},
 							},
+						},
+					},
+				},
+			},
+			"/automation/metadata": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "List All Automation Metadata",
+					"description": "Retrieve metadata for all automation scripts including virtual environment paths and return value specifications.",
+					"tags":        []string{"Automations"},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Metadata retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Create Automation Metadata",
+					"description": "Create new metadata for an automation script.",
+					"tags":        []string{"Automations"},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/AutomationMetadata",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Metadata created successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request body",
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
+						},
+					},
+				},
+			},
+			"/automation/metadata/{name}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Automation Metadata",
+					"description": "Retrieve metadata for a specific automation script.",
+					"tags":        []string{"Automations"},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the automation",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Metadata retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Metadata not found",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
+						},
+					},
+				},
+				"put": map[string]interface{}{
+					"summary":     "Update Automation Metadata",
+					"description": "Update metadata for a specific automation script.",
+					"tags":        []string{"Automations"},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the automation",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/AutomationMetadata",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Metadata updated successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request body",
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete Automation Metadata",
+					"description": "Delete metadata for a specific automation script.",
+					"tags":        []string{"Automations"},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the automation",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Metadata deleted successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Metadata not found",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/AutomationMetadataResponse",
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
 						},
 					},
 				},
@@ -2862,6 +3050,66 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					"in":          "header",
 					"name":        "X-API-Key",
 					"description": "API key for authentication",
+				},
+			},
+			"schemas": map[string]interface{}{
+				"AutomationMetadata": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{
+							"type":        "string",
+							"description": "Name of the automation script",
+							"example":     "addclient",
+						},
+						"venv": map[string]interface{}{
+							"type":        "string",
+							"description": "Path to the Python virtual environment",
+							"example":     "Venv",
+						},
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "Human-readable description of what the automation does",
+							"example":     "Adds a new client to the system and returns client information",
+						},
+						"return": map[string]interface{}{
+							"type":        "object",
+							"description": "Object describing expected return values and their types",
+							"additionalProperties": map[string]interface{}{
+								"type": "string",
+							},
+							"example": map[string]interface{}{
+								"clientname": "string",
+								"status":     "string",
+							},
+						},
+					},
+					"required": []string{"name", "venv", "return"},
+				},
+				"AutomationMetadataResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether the operation was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"metadata": map[string]interface{}{
+							"type":        "array",
+							"description": "Array of automation metadata",
+							"items": map[string]interface{}{
+								"$ref": "#/components/schemas/AutomationMetadata",
+							},
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "ISO 8601 timestamp of the response",
+						},
+					},
+					"required": []string{"success", "message", "timestamp"},
 				},
 			},
 		},
