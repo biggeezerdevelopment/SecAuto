@@ -232,6 +232,9 @@ func runServer(port string, workerCount int) {
 	http.HandleFunc("/integrations/upload", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationUploadHandler))))))
 	http.HandleFunc("/integrations/delete/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.integrationDeleteHandler))))))
 
+	// Client-specific integration configuration endpoints
+	http.HandleFunc("/clients/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.clientIntegrationsHandler))))))
+
 	// Redis cache endpoints
 	http.HandleFunc("/cache", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheHandler))))))
 	http.HandleFunc("/cache/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheKeyHandler))))))
@@ -297,6 +300,11 @@ func runServer(port string, workerCount int) {
 			{"method": "POST", "path": "/integrations", "description": "Create a new integration"},
 			{"method": "PUT", "path": "/integrations/{name}", "description": "Update an existing integration by name"},
 			{"method": "DELETE", "path": "/integrations/{name}", "description": "Delete an integration by name"},
+			{"method": "GET", "path": "/clients/{client}/integrations", "description": "List all integrations for a specific client"},
+			{"method": "GET", "path": "/clients/{client}/integrations/{name}", "description": "Get client-specific integration information"},
+			{"method": "POST", "path": "/clients/{client}/integrations/{name}", "description": "Create a client-specific integration"},
+			{"method": "PUT", "path": "/clients/{client}/integrations/{name}", "description": "Update a client-specific integration"},
+			{"method": "DELETE", "path": "/clients/{client}/integrations/{name}", "description": "Delete a client-specific integration"},
 			{"method": "POST", "path": "/integrations/upload", "description": "Upload integration Python file"},
 			{"method": "DELETE", "path": "/integrations/delete/{name}", "description": "Delete integration Python file"},
 			{"method": "GET", "path": "/cache", "description": "List cache operations"},
@@ -3845,4 +3853,211 @@ func (s *SecAutoServer) removeFromList(w http.ResponseWriter, r *http.Request, l
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// clientIntegrationsHandler handles client-specific integration configuration management
+func (s *SecAutoServer) clientIntegrationsHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract client name and integration name from URL path
+	// Expected formats:
+	// - /clients/{client}/integrations (list all integrations for client)
+	// - /clients/{client}/integrations/{integration} (specific integration)
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 3 || pathParts[0] != "clients" || pathParts[2] != "integrations" {
+		http.Error(w, "Invalid path format. Expected: /clients/{client}/integrations or /clients/{client}/integrations/{integration}", http.StatusBadRequest)
+		return
+	}
+
+	clientName := pathParts[1]
+
+	// Check if this is a list request or individual integration request
+	if len(pathParts) == 3 {
+		// List all integrations for the client
+		s.handleClientIntegrationsList(w, r, clientName)
+		return
+	}
+
+	// Individual integration request
+	integrationName := pathParts[3]
+
+	logger.Info("Client integration operation", map[string]interface{}{
+		"component":   "server",
+		"method":      r.Method,
+		"client":      clientName,
+		"integration": integrationName,
+		"path":        r.URL.Path,
+	})
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get client-specific integration configuration
+		config, exists := s.integrationConfigManager.GetConfigByClient(clientName, integrationName)
+		if !exists {
+			http.Error(w, "Client-specific integration not found", http.StatusNotFound)
+			return
+		}
+
+		// Ensure the name is set correctly in the response
+		configCopy := *config
+		configCopy.Name = integrationName
+
+		response := IntegrationResponse{
+			Success:     true,
+			Message:     "Client-specific integration retrieved successfully",
+			Integration: &configCopy,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost:
+		// Create new client-specific integration
+		var config IntegrationConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Validate configuration
+		if err := s.integrationConfigManager.ValidateConfig(&config); err != nil {
+			response := IntegrationResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Validation failed: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Set client-specific configuration
+		if err := s.integrationConfigManager.SetConfigByClient(clientName, integrationName, &config); err != nil {
+			response := IntegrationResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to create client-specific integration: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := IntegrationResponse{
+			Success:     true,
+			Message:     "Client-specific integration created successfully",
+			Integration: &config,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPut:
+		// Update client-specific integration configuration
+		var config IntegrationConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Validate configuration
+		if err := s.integrationConfigManager.ValidateConfig(&config); err != nil {
+			response := IntegrationResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Validation failed: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Update client-specific configuration
+		if err := s.integrationConfigManager.SetConfigByClient(clientName, integrationName, &config); err != nil {
+			response := IntegrationResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to update client-specific integration: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := IntegrationResponse{
+			Success:     true,
+			Message:     "Client-specific integration updated successfully",
+			Integration: &config,
+			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodDelete:
+		// Delete client-specific integration configuration
+		if err := s.integrationConfigManager.DeleteConfigByClient(clientName, integrationName); err != nil {
+			response := IntegrationResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to delete client-specific integration: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := IntegrationResponse{
+			Success:   true,
+			Message:   "Client-specific integration deleted successfully",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleClientIntegrationsList handles listing all integrations for a specific client
+func (s *SecAutoServer) handleClientIntegrationsList(w http.ResponseWriter, r *http.Request, clientName string) {
+	logger.Info("Client integrations list operation", map[string]interface{}{
+		"component": "server",
+		"method":    r.Method,
+		"client":    clientName,
+		"path":      r.URL.Path,
+	})
+
+	switch r.Method {
+	case http.MethodGet:
+		// List all integrations for the specific client
+		configs := s.integrationConfigManager.ListConfigsByClient(clientName)
+		response := IntegrationResponse{
+			Success:      true,
+			Message:      fmt.Sprintf("Client-specific integrations retrieved successfully for client: %s", clientName),
+			Integrations: make([]*IntegrationConfig, 0, len(configs)),
+			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		}
+
+		// Include integration names in the response
+		for name, config := range configs {
+			// Create a copy with the name included
+			configCopy := *config
+			configCopy.Name = name // Ensure the name is set correctly
+			response.Integrations = append(response.Integrations, &configCopy)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }

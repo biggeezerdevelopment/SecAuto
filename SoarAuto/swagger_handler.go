@@ -1839,6 +1839,489 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 			},
+			"/clients/{client}/integrations": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "List Client Integrations",
+					"description": "Retrieve all integration configurations for a specific client",
+					"tags":        []string{"Client Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "client",
+							"in":          "path",
+							"required":    true,
+							"description": "Client name (e.g., 'acme-corp', 'client-b')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integrations retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"integrations": map[string]interface{}{
+												"type": "array",
+												"items": map[string]interface{}{
+													"type": "object",
+													"properties": map[string]interface{}{
+														"name": map[string]interface{}{
+															"type": "string",
+														},
+														"type": map[string]interface{}{
+															"type": "string",
+														},
+														"client": map[string]interface{}{
+															"type": "string",
+														},
+														"enabled": map[string]interface{}{
+															"type": "boolean",
+														},
+														"description": map[string]interface{}{
+															"type": "string",
+														},
+														"version": map[string]interface{}{
+															"type": "string",
+														},
+														"created_at": map[string]interface{}{
+															"type":   "string",
+															"format": "date-time",
+														},
+														"updated_at": map[string]interface{}{
+															"type":   "string",
+															"format": "date-time",
+														},
+													},
+												},
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid client name",
+						},
+					},
+				},
+			},
+			"/clients/{client}/integrations/{integration}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Client Integration",
+					"description": "Retrieve a specific client integration configuration",
+					"tags":        []string{"Client Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "client",
+							"in":          "path",
+							"required":    true,
+							"description": "Client name (e.g., 'acme-corp', 'client-b')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integration",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., 'virustotal', 'slack')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integration retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"integration": map[string]interface{}{
+												"type": "object",
+												"properties": map[string]interface{}{
+													"name": map[string]interface{}{
+														"type": "string",
+													},
+													"type": map[string]interface{}{
+														"type": "string",
+													},
+													"client": map[string]interface{}{
+														"type": "string",
+													},
+													"url": map[string]interface{}{
+														"type": "string",
+													},
+													"apikey": map[string]interface{}{
+														"type": "string",
+													},
+													"enabled": map[string]interface{}{
+														"type": "boolean",
+													},
+													"description": map[string]interface{}{
+														"type": "string",
+													},
+													"version": map[string]interface{}{
+														"type": "string",
+													},
+													"settings": map[string]interface{}{
+														"type": "object",
+													},
+													"created_at": map[string]interface{}{
+														"type":   "string",
+														"format": "date-time",
+													},
+													"updated_at": map[string]interface{}{
+														"type":   "string",
+														"format": "date-time",
+													},
+												},
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client integration not found",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Create Client Integration",
+					"description": "Create a new client-specific integration configuration with encrypted credentials",
+					"tags":        []string{"Client Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "client",
+							"in":          "path",
+							"required":    true,
+							"description": "Client name (e.g., 'acme-corp', 'client-b')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integration",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., 'virustotal', 'slack')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type": "object",
+									"properties": map[string]interface{}{
+										"name": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration name (optional, will use path parameter)",
+										},
+										"type": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration type (virustotal, slack, email, etc.)",
+										},
+										"url": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration API URL",
+										},
+										"apikey": map[string]interface{}{
+											"type":        "string",
+											"description": "API key (will be encrypted)",
+										},
+										"username": map[string]interface{}{
+											"type":        "string",
+											"description": "Username for authentication",
+										},
+										"password": map[string]interface{}{
+											"type":        "string",
+											"description": "Password (will be encrypted)",
+										},
+										"token": map[string]interface{}{
+											"type":        "string",
+											"description": "Access token (will be encrypted)",
+										},
+										"secret": map[string]interface{}{
+											"type":        "string",
+											"description": "Secret key (will be encrypted)",
+										},
+										"enabled": map[string]interface{}{
+											"type":        "boolean",
+											"description": "Whether the integration is enabled",
+										},
+										"description": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration description",
+										},
+										"version": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration version",
+										},
+										"settings": map[string]interface{}{
+											"type":        "object",
+											"description": "Additional configuration settings",
+										},
+									},
+									"required": []string{"type"},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integration created successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"integration": map[string]interface{}{
+												"type": "object",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Validation failed",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				"put": map[string]interface{}{
+					"summary":     "Update Client Integration",
+					"description": "Update an existing client-specific integration configuration",
+					"tags":        []string{"Client Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "client",
+							"in":          "path",
+							"required":    true,
+							"description": "Client name (e.g., 'acme-corp', 'client-b')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integration",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., 'virustotal', 'slack')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type": "object",
+									"properties": map[string]interface{}{
+										"name": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration name (optional, will use path parameter)",
+										},
+										"type": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration type",
+										},
+										"url": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration API URL",
+										},
+										"apikey": map[string]interface{}{
+											"type":        "string",
+											"description": "API key (will be encrypted)",
+										},
+										"username": map[string]interface{}{
+											"type":        "string",
+											"description": "Username for authentication",
+										},
+										"password": map[string]interface{}{
+											"type":        "string",
+											"description": "Password (will be encrypted)",
+										},
+										"token": map[string]interface{}{
+											"type":        "string",
+											"description": "Access token (will be encrypted)",
+										},
+										"secret": map[string]interface{}{
+											"type":        "string",
+											"description": "Secret key (will be encrypted)",
+										},
+										"enabled": map[string]interface{}{
+											"type":        "boolean",
+											"description": "Whether the integration is enabled",
+										},
+										"description": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration description",
+										},
+										"version": map[string]interface{}{
+											"type":        "string",
+											"description": "Integration version",
+										},
+										"settings": map[string]interface{}{
+											"type":        "object",
+											"description": "Additional configuration settings",
+										},
+									},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integration updated successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"integration": map[string]interface{}{
+												"type": "object",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Validation failed",
+						},
+						"404": map[string]interface{}{
+							"description": "Client integration not found",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete Client Integration",
+					"description": "Delete a client-specific integration configuration",
+					"tags":        []string{"Client Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "client",
+							"in":          "path",
+							"required":    true,
+							"description": "Client name (e.g., 'acme-corp', 'client-b')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integration",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., 'virustotal', 'slack')",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integration deleted successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"success": map[string]interface{}{
+												"type": "boolean",
+											},
+											"message": map[string]interface{}{
+												"type": "string",
+											},
+											"timestamp": map[string]interface{}{
+												"type":   "string",
+												"format": "date-time",
+											},
+										},
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client integration not found",
+						},
+					},
+				},
+			},
 			"/cache": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "Get Cache Information",
@@ -2433,6 +2916,10 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			{
 				"name":        "Lists",
 				"description": "Redis list management endpoints",
+			},
+			{
+				"name":        "Client Integrations",
+				"description": "Client-specific integration management endpoints",
 			},
 		},
 	}
