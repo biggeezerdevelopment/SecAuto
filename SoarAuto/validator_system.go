@@ -33,9 +33,11 @@ type ValidationResponse struct {
 
 // Validator provides input validation and sanitization
 type Validator struct {
-	scriptNameRegex *regexp.Regexp
-	pathRegex       *regexp.Regexp
-	urlRegex        *regexp.Regexp
+	scriptNameRegex     *regexp.Regexp
+	pathRegex           *regexp.Regexp
+	urlRegex            *regexp.Regexp
+	uuidRegex           *regexp.Regexp
+	underscoreRegex     *regexp.Regexp
 }
 
 // NewValidator creates a new validator
@@ -44,6 +46,8 @@ func NewValidator() *Validator {
 		scriptNameRegex: regexp.MustCompile(`^[a-zA-Z0-9_-]+$`),
 		pathRegex:       regexp.MustCompile(`^[a-zA-Z0-9/._-]+$`),
 		urlRegex:        regexp.MustCompile(`^https?://[^\s/$.?#].[^\s]*$`),
+		uuidRegex:       regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`),
+		underscoreRegex: regexp.MustCompile(`_+`),
 	}
 }
 
@@ -172,9 +176,8 @@ func (v *Validator) ValidateJobID(jobID string) ValidationResult {
 		}
 	}
 
-	// UUID format validation
-	uuidRegex := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	if !uuidRegex.MatchString(jobID) {
+	// UUID format validation using pre-compiled regex
+	if !v.uuidRegex.MatchString(jobID) {
 		return ValidationResult{
 			Valid: false,
 			Errors: []ValidationError{{
@@ -341,9 +344,8 @@ func (v *Validator) SanitizeFilename(filename string) string {
 		sanitized = strings.ReplaceAll(sanitized, old, new)
 	}
 
-	// Remove multiple underscores
-	regex := regexp.MustCompile(`_+`)
-	sanitized = regex.ReplaceAllString(sanitized, "_")
+	// Remove multiple underscores using pre-compiled regex
+	sanitized = v.underscoreRegex.ReplaceAllString(sanitized, "_")
 
 	// Remove leading/trailing underscores
 	sanitized = strings.Trim(sanitized, "_")

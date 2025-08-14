@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -18,6 +17,10 @@ type RuleEngine struct {
 	contextHash   string
 	pluginManager *PlatformPluginManager
 	cache         *ContextCache
+	
+	// Pre-compiled regular expressions for better performance
+	templateVarRegex    *regexp.Regexp
+	templateStringRegex *regexp.Regexp
 }
 
 // NewRuleEngine creates a new rule engine instance
@@ -62,6 +65,10 @@ func NewRuleEngine(config *Config) *RuleEngine {
 		context:       make(map[string]interface{}),
 		pluginManager: nil, // Will be set by SetPluginManager
 		cache:         NewContextCache(cacheConfig),
+		
+		// Pre-compile regular expressions for better performance
+		templateVarRegex:    regexp.MustCompile(`^\{\{([^}]+)\}\}$`),
+		templateStringRegex: regexp.MustCompile(`\{\{([^}]+)\}\}`),
 	}
 }
 
@@ -1084,6 +1091,74 @@ func (re *RuleEngine) isTruthy(value interface{}) bool {
 	}
 }
 
+// deepEqual performs deep equality comparison using type switches instead of reflection
+// This is faster than reflect.DeepEqual for our use cases
+func (re *RuleEngine) deepEqual(left, right interface{}) bool {
+	// Handle nil cases
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	
+	// Type switch for better performance than reflection
+	switch leftVal := left.(type) {
+	case string:
+		if rightVal, ok := right.(string); ok {
+			return leftVal == rightVal
+		}
+	case int:
+		if rightVal, ok := right.(int); ok {
+			return leftVal == rightVal
+		}
+		// Handle int/float64 cross-comparison
+		if rightVal, ok := right.(float64); ok {
+			return float64(leftVal) == rightVal
+		}
+	case float64:
+		if rightVal, ok := right.(float64); ok {
+			return leftVal == rightVal
+		}
+		// Handle float64/int cross-comparison
+		if rightVal, ok := right.(int); ok {
+			return leftVal == float64(rightVal)
+		}
+	case bool:
+		if rightVal, ok := right.(bool); ok {
+			return leftVal == rightVal
+		}
+	case []interface{}:
+		if rightVal, ok := right.([]interface{}); ok {
+			if len(leftVal) != len(rightVal) {
+				return false
+			}
+			for i, leftItem := range leftVal {
+				if !re.deepEqual(leftItem, rightVal[i]) {
+					return false
+				}
+			}
+			return true
+		}
+	case map[string]interface{}:
+		if rightVal, ok := right.(map[string]interface{}); ok {
+			if len(leftVal) != len(rightVal) {
+				return false
+			}
+			for key, leftItem := range leftVal {
+				rightItem, exists := rightVal[key]
+				if !exists || !re.deepEqual(leftItem, rightItem) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	
+	// For any other types not handled above, they're equal only if they're the same value
+	return left == right
+}
+
 // compareValues compares two values using the specified operator
 func (re *RuleEngine) compareValues(left, right interface{}, op string) (bool, error) {
 	logger.Debug("Comparing values", map[string]interface{}{
@@ -1175,17 +1250,17 @@ func (re *RuleEngine) compareValues(left, right interface{}, op string) (bool, e
 		}
 	}
 
-	// Default comparison
+	// Default comparison using custom deep equals (faster than reflection)
 	switch op {
 	case "==", "===", "eq":
-		result := reflect.DeepEqual(leftNorm, rightNorm)
+		result := re.deepEqual(leftNorm, rightNorm)
 		logger.Debug("DeepEqual comparison result", map[string]interface{}{
 			"component": "rules_engine",
 			"result":    result,
 		})
 		return result, nil
 	case "!=", "!==":
-		return !reflect.DeepEqual(leftNorm, rightNorm), nil
+		return !re.deepEqual(leftNorm, rightNorm), nil
 	case ">", "gt", "<", "lt", ">=", "gte", "<=", "lte":
 		// Try numeric comparison for these operators
 		if leftNum, leftOk := leftNorm.(float64); leftOk {
@@ -1289,8 +1364,7 @@ func (re *RuleEngine) processTemplateVariables(value interface{}, data map[strin
 	switch v := value.(type) {
 	case string:
 		// Check if the string is exactly a template variable (e.g. "{{threat_intelligence.domains}}")
-		regex := regexp.MustCompile(`^\{\{([^}]+)\}\}$`)
-		if matches := regex.FindStringSubmatch(v); len(matches) == 2 {
+		if matches := re.templateVarRegex.FindStringSubmatch(v); len(matches) == 2 {
 			variableName := strings.TrimSpace(matches[1])
 			logger.Debug("processTemplateVariables: Found exact template variable", map[string]interface{}{
 				"variable": variableName,
@@ -1341,10 +1415,8 @@ func (re *RuleEngine) processTemplateVariables(value interface{}, data map[strin
 
 // processStringTemplate processes {{variable}} syntax in a string
 func (re *RuleEngine) processStringTemplate(template string, data map[string]interface{}) string {
-	// Regular expression to match {{variable}} patterns
-	regex := regexp.MustCompile(`\{\{([^}]+)\}\}`)
-
-	return regex.ReplaceAllStringFunc(template, func(match string) string {
+	// Use pre-compiled regex to match {{variable}} patterns
+	return re.templateStringRegex.ReplaceAllStringFunc(template, func(match string) string {
 		// Extract variable name from {{variable}}
 		variableName := strings.TrimSpace(match[2 : len(match)-2])
 
