@@ -12,7 +12,7 @@ server:
 
 # Logging Configuration
 logging:
-  level: "INFO"
+  level: "DEBUG"
   destination: "both"
   file: "logs/secauto.log"
   rotation:

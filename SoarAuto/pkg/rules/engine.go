@@ -1,13 +1,14 @@
 package rules
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
-	"unicode"
 
 	"SoarAuto/pkg/cache"
 	"SoarAuto/pkg/config"
@@ -260,16 +261,33 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 	// Process template variables in script name
 	processedScriptName := re.processStringTemplate(scriptNameStr, data)
 	
-	// Create a basic result for demonstration
-	// In a real implementation, this would execute the actual script
-	result := map[string]interface{}{
-		"script":    processedScriptName,
-		"executed":  true,
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"context":   data,
+	// Get full path to script
+	scriptPath := re.getScriptPath(processedScriptName)
+	
+	// Check if script exists
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("script not found: %s", scriptPath)
 	}
 	
-	return result, nil
+	// Process additional parameters from the operation and merge with context
+	enhancedData := make(map[string]interface{})
+	
+	// Copy original context
+	for k, v := range data {
+		enhancedData[k] = v
+	}
+	
+	// Process additional parameters (everything except "run")
+	for key, value := range operation {
+		if key != "run" {
+			// Process template variables in the parameter value
+			processedValue := re.processTemplateVariables(value, data)
+			enhancedData[key] = processedValue
+		}
+	}
+	
+	// Execute the script with enhanced context
+	return re.executeScript(scriptPath, enhancedData)
 }
 
 // evaluatePlayOperation handles 'play' operations
@@ -281,6 +299,11 @@ func (re *Engine) evaluatePlayOperation(playbookName interface{}, data map[strin
 
 	// Process template variables
 	processedPlaybookName := re.processStringTemplate(playbookNameStr, data)
+	
+	// Auto-append .json extension if not present
+	if !strings.HasSuffix(processedPlaybookName, ".json") {
+		processedPlaybookName += ".json"
+	}
 	
 	// Load and execute playbook
 	playbook, err := re.LoadPlaybookFromFile(re.getPlaybookPath(processedPlaybookName))
@@ -446,7 +469,7 @@ func (re *Engine) processStringTemplate(template string, data map[string]interfa
 // evaluateDotNotation evaluates dot notation like "user.name"
 func (re *Engine) evaluateDotNotation(path string, data map[string]interface{}) (interface{}, error) {
 	parts := strings.Split(path, ".")
-	current := data
+	var current interface{} = data
 	
 	for i, part := range parts {
 		if current == nil {
@@ -461,7 +484,6 @@ func (re *Engine) evaluateDotNotation(path string, data map[string]interface{}) 
 					return val, nil
 				} else {
 					// Continue traversal
-					current = map[string]interface{}{}
 					if nextMap, ok := val.(map[string]interface{}); ok {
 						current = nextMap
 					} else {
@@ -484,24 +506,430 @@ func (re *Engine) evaluateDotNotation(path string, data map[string]interface{}) 
 
 // evaluateIfOperation handles 'if' operations
 func (re *Engine) evaluateIfOperation(ifExpr interface{}, data map[string]interface{}) (interface{}, error) {
-	// Implementation would go here
-	return nil, fmt.Errorf("if operation not implemented in this abbreviated version")
+	ifMap, ok := ifExpr.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("if expression must be an object")
+	}
+
+	// Get condition
+	condition, exists := ifMap["condition"]
+	if !exists {
+		return nil, fmt.Errorf("if expression must have a condition")
+	}
+
+	// Evaluate condition
+	conditionResult, err := re.evaluate(condition, data)
+	if err != nil {
+		return nil, fmt.Errorf("error evaluating condition: %v", err)
+	}
+
+	// Convert to boolean
+	conditionBool := re.isTruthy(conditionResult)
+
+	if conditionBool {
+		// Execute 'then' branch
+		if thenExpr, exists := ifMap["then"]; exists {
+			return re.evaluate(thenExpr, data)
+		}
+		return true, nil
+	} else {
+		// Execute 'else' branch if it exists
+		if elseExpr, exists := ifMap["else"]; exists {
+			return re.evaluate(elseExpr, data)
+		}
+		return false, nil
+	}
 }
 
 // evaluateVarOperation handles 'var' operations  
 func (re *Engine) evaluateVarOperation(varName interface{}, data map[string]interface{}) (interface{}, error) {
-	// Implementation would go here
-	return nil, fmt.Errorf("var operation not implemented in this abbreviated version")
+	varNameStr, ok := varName.(string)
+	if !ok {
+		return nil, fmt.Errorf("variable name must be a string")
+	}
+
+	// Use lazy evaluation if enabled
+	if re.cache != nil {
+		lazyVar := re.cache.GetOrCreateLazyVariable(varNameStr, varNameStr, func() (interface{}, error) {
+			return re.evaluateDotNotation(varNameStr, data)
+		})
+		
+		return lazyVar.Evaluate()
+	}
+
+	// Direct evaluation
+	return re.evaluateDotNotation(varNameStr, data)
 }
 
 // evaluateComparison handles comparison operations
 func (re *Engine) evaluateComparison(operation map[string]interface{}, op string, data map[string]interface{}) (bool, error) {
-	// Implementation would go here
-	return false, fmt.Errorf("comparison operation not implemented in this abbreviated version")
+	left, leftExists := operation["left"]
+	right, rightExists := operation["right"]
+
+	if !leftExists || !rightExists {
+		// Try to get values directly from the operation
+		for key, value := range operation {
+			if key == op {
+				continue // Skip the operator key
+			}
+			if left == nil {
+				left = key
+			} else if right == nil {
+				right = value
+				break
+			}
+		}
+	}
+
+	if left == nil || right == nil {
+		return false, fmt.Errorf("comparison requires both left and right operands")
+	}
+
+	// Evaluate operands
+	leftResult, err := re.evaluate(left, data)
+	if err != nil {
+		return false, err
+	}
+
+	rightResult, err := re.evaluate(right, data)
+	if err != nil {
+		return false, err
+	}
+
+	// Perform comparison
+	return re.compareValues(leftResult, rightResult, op)
 }
 
 // evaluateLogical handles logical operations
 func (re *Engine) evaluateLogical(operation map[string]interface{}, op string, data map[string]interface{}) (interface{}, error) {
-	// Implementation would go here
-	return nil, fmt.Errorf("logical operation not implemented in this abbreviated version")
+	switch op {
+	case "and":
+		operands, exists := operation["and"]
+		if !exists {
+			return false, fmt.Errorf("and operation requires operands")
+		}
+		return re.evaluateAnd(operands, data)
+		
+	case "or":
+		operands, exists := operation["or"]
+		if !exists {
+			return false, fmt.Errorf("or operation requires operands")
+		}
+		return re.evaluateOr(operands, data)
+		
+	case "not":
+		operand, exists := operation["not"]
+		if !exists {
+			return false, fmt.Errorf("not operation requires operand")
+		}
+		return re.evaluateNot(operand, data)
+		
+	default:
+		return false, fmt.Errorf("unknown logical operator: %s", op)
+	}
+}
+
+// compareValues compares two values using the specified operator
+func (re *Engine) compareValues(left, right interface{}, op string) (bool, error) {
+	switch op {
+	case "==", "===", "eq":
+		return re.deepEqual(left, right), nil
+	case "!=", "!==", "ne":
+		return !re.deepEqual(left, right), nil
+	case ">", "gt":
+		return re.compareNumeric(left, right, ">")
+	case "<", "lt":
+		return re.compareNumeric(left, right, "<")
+	case ">=", "gte":
+		return re.compareNumeric(left, right, ">=")
+	case "<=", "lte":
+		return re.compareNumeric(left, right, "<=")
+	case "contains":
+		return re.containsValue(left, right), nil
+	case "in":
+		return re.containsValue(right, left), nil
+	default:
+		return false, fmt.Errorf("unknown comparison operator: %s", op)
+	}
+}
+
+// deepEqual performs deep equality comparison using type switches instead of reflection
+func (re *Engine) deepEqual(left, right interface{}) bool {
+	if left == nil && right == nil {
+		return true
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	
+	switch leftVal := left.(type) {
+	case string:
+		if rightVal, ok := right.(string); ok {
+			return leftVal == rightVal
+		}
+	case int:
+		if rightVal, ok := right.(int); ok {
+			return leftVal == rightVal
+		}
+		if rightVal, ok := right.(float64); ok {
+			return float64(leftVal) == rightVal
+		}
+	case float64:
+		if rightVal, ok := right.(float64); ok {
+			return leftVal == rightVal
+		}
+		if rightVal, ok := right.(int); ok {
+			return leftVal == float64(rightVal)
+		}
+	case bool:
+		if rightVal, ok := right.(bool); ok {
+			return leftVal == rightVal
+		}
+	case []interface{}:
+		if rightVal, ok := right.([]interface{}); ok {
+			if len(leftVal) != len(rightVal) {
+				return false
+			}
+			for i, leftItem := range leftVal {
+				if !re.deepEqual(leftItem, rightVal[i]) {
+					return false
+				}
+			}
+			return true
+		}
+	case map[string]interface{}:
+		if rightVal, ok := right.(map[string]interface{}); ok {
+			if len(leftVal) != len(rightVal) {
+				return false
+			}
+			for key, leftItem := range leftVal {
+				rightItem, exists := rightVal[key]
+				if !exists || !re.deepEqual(leftItem, rightItem) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	
+	return left == right
+}
+
+// compareNumeric compares numeric values
+func (re *Engine) compareNumeric(left, right interface{}, op string) (bool, error) {
+	leftFloat, leftOk := re.toFloat64(left)
+	rightFloat, rightOk := re.toFloat64(right)
+	
+	if !leftOk || !rightOk {
+		return false, fmt.Errorf("cannot compare non-numeric values")
+	}
+	
+	switch op {
+	case ">":
+		return leftFloat > rightFloat, nil
+	case "<":
+		return leftFloat < rightFloat, nil
+	case ">=":
+		return leftFloat >= rightFloat, nil
+	case "<=":
+		return leftFloat <= rightFloat, nil
+	default:
+		return false, fmt.Errorf("unknown numeric operator: %s", op)
+	}
+}
+
+// toFloat64 converts a value to float64 if possible
+func (re *Engine) toFloat64(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	default:
+		return 0, false
+	}
+}
+
+// containsValue checks if a container contains a value
+func (re *Engine) containsValue(container, value interface{}) bool {
+	switch cont := container.(type) {
+	case string:
+		if strVal, ok := value.(string); ok {
+			return strings.Contains(cont, strVal)
+		}
+	case []interface{}:
+		for _, item := range cont {
+			if re.deepEqual(item, value) {
+				return true
+			}
+		}
+	case map[string]interface{}:
+		if keyStr, ok := value.(string); ok {
+			_, exists := cont[keyStr]
+			return exists
+		}
+	}
+	return false
+}
+
+// isTruthy determines if a value is truthy
+func (re *Engine) isTruthy(value interface{}) bool {
+	if value == nil {
+		return false
+	}
+	
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return v != ""
+	case int:
+		return v != 0
+	case float64:
+		return v != 0.0
+	case []interface{}:
+		return len(v) > 0
+	case map[string]interface{}:
+		return len(v) > 0
+	default:
+		return true
+	}
+}
+
+// evaluateAnd evaluates logical AND
+func (re *Engine) evaluateAnd(operands interface{}, data map[string]interface{}) (bool, error) {
+	operandArray, ok := operands.([]interface{})
+	if !ok {
+		return false, fmt.Errorf("and operands must be an array")
+	}
+	
+	for _, operand := range operandArray {
+		result, err := re.evaluate(operand, data)
+		if err != nil {
+			return false, err
+		}
+		if !re.isTruthy(result) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// evaluateOr evaluates logical OR
+func (re *Engine) evaluateOr(operands interface{}, data map[string]interface{}) (bool, error) {
+	operandArray, ok := operands.([]interface{})
+	if !ok {
+		return false, fmt.Errorf("or operands must be an array")
+	}
+	
+	for _, operand := range operandArray {
+		result, err := re.evaluate(operand, data)
+		if err != nil {
+			return false, err
+		}
+		if re.isTruthy(result) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// evaluateNot evaluates logical NOT
+func (re *Engine) evaluateNot(operand interface{}, data map[string]interface{}) (bool, error) {
+	result, err := re.evaluate(operand, data)
+	if err != nil {
+		return false, err
+	}
+	return !re.isTruthy(result), nil
+}
+
+// executeScript executes a Python script with the given context
+func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) (interface{}, error) {
+	// Get Python interpreter path from config
+	pythonPath := "python3" // Default
+	if re.config.Python.VenvPath != "" {
+		// Use virtual environment if configured
+		pythonPath = re.config.Python.VenvPath + "/bin/python"
+		// Check if it's Windows
+		if _, err := os.Stat(re.config.Python.VenvPath + "/Scripts/python.exe"); err == nil {
+			pythonPath = re.config.Python.VenvPath + "/Scripts/python.exe"
+		}
+	}
+	
+	// Prepare context as JSON for the script
+	contextJSON, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal context: %v", err)
+	}
+	
+	// Create command with timeout
+	timeout := time.Duration(re.config.Python.ScriptTimeout) * time.Second
+	if timeout == 0 {
+		timeout = 300 * time.Second // 5 minute default
+	}
+	
+	// Create the command
+	cmd := exec.Command(pythonPath, scriptPath)
+	
+	// Set environment variables
+	cmd.Env = append(os.Environ(), fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)))
+	
+	// Prepare stdin with context data
+	cmd.Stdin = bytes.NewReader(contextJSON)
+	
+	// Capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start script %s: %v", scriptPath, err)
+	}
+	
+	// Wait with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, fmt.Errorf("script %s failed: %v\nStderr: %s", scriptPath, err, stderr.String())
+		}
+	case <-time.After(timeout):
+		cmd.Process.Kill()
+		return nil, fmt.Errorf("script %s timed out after %v", scriptPath, timeout)
+	}
+	
+	// Parse the output
+	outputStr := strings.TrimSpace(stdout.String())
+	if outputStr == "" {
+		// If no JSON output, return basic execution info
+		return map[string]interface{}{
+			"script":    scriptPath,
+			"executed":  true,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"output":    "",
+			"stderr":    stderr.String(),
+		}, nil
+	}
+	
+	// Try to parse as JSON
+	var result interface{}
+	if err := json.Unmarshal([]byte(outputStr), &result); err != nil {
+		// If not JSON, return as plain text
+		return map[string]interface{}{
+			"script":    scriptPath,
+			"executed":  true,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"output":    outputStr,
+			"stderr":    stderr.String(),
+		}, nil
+	}
+	
+	return result, nil
 }

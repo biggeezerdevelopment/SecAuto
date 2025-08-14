@@ -212,6 +212,8 @@ type ContextCache interface {
 	GetExpression(hash string) (*CachedExpression, bool)
 	StoreExpression(exprHash string, result interface{}, err error)
 	GetOrCreateLazyVariable(name, path string, evaluator func() (interface{}, error)) *LazyVariable
+	HashContext(context map[string]interface{}) string
+	HashExpression(expr interface{}, contextHash string) string
 	GetStats() CacheStats
 	Clear()
 	Close()
@@ -248,6 +250,22 @@ type LazyVariable struct {
 	CreatedAt time.Time
 	LastUsed  time.Time
 	UseCount  int64
+}
+
+// Evaluate executes the lazy evaluation if not already done
+func (lv *LazyVariable) Evaluate() (interface{}, error) {
+	if lv.Evaluated {
+		return lv.Result, lv.Error
+	}
+	
+	if lv.Evaluator != nil {
+		lv.Result, lv.Error = lv.Evaluator()
+		lv.Evaluated = true
+		lv.LastUsed = time.Now()
+		lv.UseCount++
+	}
+	
+	return lv.Result, lv.Error
 }
 
 // CacheStats represents cache statistics
@@ -385,3 +403,38 @@ const (
 	ScheduleStatusDisabled ScheduleStatus = "disabled"
 	ScheduleStatusAll      ScheduleStatus = ""
 )
+
+// Cache operation response types
+type CacheResponse struct {
+	Success      bool        `json:"success"`
+	Key          string      `json:"key,omitempty"`
+	Value        interface{} `json:"value,omitempty"`
+	Message      string      `json:"message,omitempty"`
+	ErrorMessage string      `json:"error,omitempty"`
+	Timestamp    string      `json:"timestamp"`
+}
+
+type CacheListResponse struct {
+	Success   bool     `json:"success"`
+	Keys      []string `json:"keys,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Timestamp string   `json:"timestamp"`
+}
+
+type CacheStatsResponse struct {
+	Success   bool                   `json:"success"`
+	Stats     map[string]interface{} `json:"stats,omitempty"`
+	Message   string                 `json:"message,omitempty"`
+	Timestamp string                 `json:"timestamp"`
+}
+
+// Redis list operation types
+type ListResponse struct {
+	Success   bool          `json:"success"`
+	ListName  string        `json:"list_name,omitempty"`
+	Items     []interface{} `json:"items,omitempty"`
+	Count     int           `json:"count,omitempty"`
+	Message   string        `json:"message,omitempty"`
+	Error     string        `json:"error,omitempty"`
+	Timestamp string        `json:"timestamp"`
+}

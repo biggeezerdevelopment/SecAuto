@@ -225,6 +225,11 @@ func (cc *ContextCache) hashContext(context map[string]interface{}) string {
 	return fmt.Sprintf("%x", hash)
 }
 
+// HashContext creates a hash for a context map (public method)
+func (cc *ContextCache) HashContext(context map[string]interface{}) string {
+	return cc.hashContext(context)
+}
+
 // HashExpression creates a hash for an expression and context combination
 func (cc *ContextCache) HashExpression(expr interface{}, contextHash string) string {
 	exprData, _ := json.Marshal(expr)
