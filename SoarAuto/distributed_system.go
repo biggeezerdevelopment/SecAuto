@@ -59,7 +59,8 @@ type DistributedJob struct {
 // ClusterManager manages the distributed cluster
 type ClusterManager struct {
 	config        *ClusterConfig
-	redisClient   *redis.Client
+	pool          *RedisPool
+	redisClient   *redis.Client // Kept for backward compatibility
 	nodeInfo      *NodeInfo
 	nodes         map[string]*NodeInfo
 	mutex         sync.RWMutex
@@ -73,7 +74,8 @@ type ClusterManager struct {
 
 // DistributedJobQueue manages the Redis-based job queue
 type DistributedJobQueue struct {
-	redisClient *redis.Client
+	pool        *RedisPool
+	redisClient *redis.Client // Kept for backward compatibility
 	queueName   string
 	ctx         context.Context
 	logger      *StructuredLogger
@@ -91,12 +93,20 @@ type HealthChecker struct {
 func NewClusterManager(config *ClusterConfig, server *SecAutoServer) (*ClusterManager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Initialize Redis client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     config.RedisURL,
-		Password: config.RedisPassword,
-		DB:       config.RedisDB,
-	})
+	// Get the global Redis pool instance
+	pool := GetRedisPool()
+	var redisClient *redis.Client
+	
+	if pool != nil {
+		redisClient = pool.GetClusterClient()
+	} else {
+		// Fallback: Initialize Redis client directly if pool is not available
+		redisClient = redis.NewClient(&redis.Options{
+			Addr:     config.RedisURL,
+			Password: config.RedisPassword,
+			DB:       config.RedisDB,
+		})
+	}
 
 	// Test Redis connection
 	if err := redisClient.Ping(ctx).Err(); err != nil {
@@ -132,6 +142,7 @@ func NewClusterManager(config *ClusterConfig, server *SecAutoServer) (*ClusterMa
 
 	clusterManager := &ClusterManager{
 		config:      config,
+		pool:        pool,
 		redisClient: redisClient,
 		nodeInfo:    nodeInfo,
 		nodes:       make(map[string]*NodeInfo),
@@ -143,6 +154,7 @@ func NewClusterManager(config *ClusterConfig, server *SecAutoServer) (*ClusterMa
 
 	// Initialize job queue
 	jobQueue := &DistributedJobQueue{
+		pool:        pool,
 		redisClient: redisClient,
 		queueName:   fmt.Sprintf("secauto:jobs:%s", config.ClusterName),
 		ctx:         ctx,
@@ -202,7 +214,8 @@ func (cm *ClusterManager) registerNode() error {
 	}
 
 	key := fmt.Sprintf("secauto:nodes:%s:%s", cm.config.ClusterName, cm.nodeInfo.ID)
-	err = cm.redisClient.Set(cm.ctx, key, nodeData, time.Duration(cm.config.HeartbeatInterval*3)*time.Second).Err()
+	client := cm.getClient()
+	err = client.Set(cm.ctx, key, nodeData, time.Duration(cm.config.HeartbeatInterval*3)*time.Second).Err()
 	if err != nil {
 		return fmt.Errorf("failed to register node: %v", err)
 	}
@@ -312,7 +325,8 @@ func (cm *ClusterManager) startNodeDiscovery() {
 // discoverNodes discovers other nodes in the cluster
 func (cm *ClusterManager) discoverNodes() {
 	pattern := fmt.Sprintf("secauto:nodes:%s:*", cm.config.ClusterName)
-	keys, err := cm.redisClient.Keys(cm.ctx, pattern).Result()
+	client := cm.getClient()
+	keys, err := client.Keys(cm.ctx, pattern).Result()
 	if err != nil {
 		cm.logger.Error("Failed to discover nodes", map[string]interface{}{
 			"component": "cluster_manager",
@@ -323,7 +337,7 @@ func (cm *ClusterManager) discoverNodes() {
 
 	newNodes := make(map[string]*NodeInfo)
 	for _, key := range keys {
-		nodeData, err := cm.redisClient.Get(cm.ctx, key).Result()
+		nodeData, err := client.Get(cm.ctx, key).Result()
 		if err != nil {
 			continue
 		}
@@ -414,11 +428,16 @@ func (cm *ClusterManager) Close() error {
 
 	// Deregister node
 	key := fmt.Sprintf("secauto:nodes:%s:%s", cm.config.ClusterName, cm.nodeInfo.ID)
-	cm.redisClient.Del(cm.ctx, key)
+	client := cm.getClient()
+	client.Del(cm.ctx, key)
 
 	// Close Redis connection
-	if err := cm.redisClient.Close(); err != nil {
-		return fmt.Errorf("failed to close Redis connection: %v", err)
+	// Connection pool will be closed when the application shuts down
+	// Individual connections are managed by the pool
+	if cm.pool == nil && cm.redisClient != nil {
+		if err := cm.redisClient.Close(); err != nil {
+			return fmt.Errorf("failed to close Redis connection: %v", err)
+		}
 	}
 
 	cm.logger.Info("Cluster manager stopped", map[string]interface{}{
@@ -567,4 +586,20 @@ func (cm *ClusterManager) calculateLoad() float64 {
 func getLocalIP() string {
 	// Simple implementation - in production, you'd want more robust IP detection
 	return "localhost"
+}
+
+// getClient returns the appropriate Redis client from the pool
+func (cm *ClusterManager) getClient() *redis.Client {
+	if cm.pool != nil {
+		return cm.pool.GetClusterClient()
+	}
+	return cm.redisClient
+}
+
+// getClient returns the appropriate Redis client from the pool
+func (djq *DistributedJobQueue) getClient() *redis.Client {
+	if djq.pool != nil {
+		return djq.pool.GetClusterClient()
+	}
+	return djq.redisClient
 }

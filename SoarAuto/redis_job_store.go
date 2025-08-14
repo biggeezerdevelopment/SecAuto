@@ -11,32 +11,50 @@ import (
 
 // RedisJobStore provides persistent storage for jobs using Redis
 type RedisJobStore struct {
-	client *redis.Client
+	pool   *RedisPool
+	client *redis.Client // Kept for backward compatibility
 	ctx    context.Context
 }
 
-// NewRedisJobStore creates a new Redis job store
+// NewRedisJobStore creates a new Redis job store using connection pooling
 func NewRedisJobStore(redisURL string) (*RedisJobStore, error) {
-	// Parse Redis URL (format: redis://host:port/db)
-	opt, err := redis.ParseURL(redisURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URL: %v", err)
-	}
+	// Get the global Redis pool instance
+	pool := GetRedisPool()
+	if pool == nil {
+		// Fallback: create a new client if pool is not initialized
+		opt, err := redis.ParseURL(redisURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Redis URL: %v", err)
+		}
 
-	client := redis.NewClient(opt)
-	ctx := context.Background()
+		client := redis.NewClient(opt)
+		ctx := context.Background()
 
-	// Test the connection
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+		// Test the connection
+		if err := client.Ping(ctx).Err(); err != nil {
+			return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+		}
+
+		store := &RedisJobStore{
+			client: client,
+			ctx:    context.Background(),
+		}
+
+		logger.Info("Initialized Redis job store with standalone client", map[string]interface{}{
+			"component": "job_store",
+			"redis_url": redisURL,
+		})
+
+		return store, nil
 	}
 
 	store := &RedisJobStore{
-		client: client,
-		ctx:    ctx,
+		pool:   pool,
+		client: pool.GetClient(),
+		ctx:    context.Background(),
 	}
 
-	logger.Info("Initialized Redis job store", map[string]interface{}{
+	logger.Info("Initialized Redis job store with connection pool", map[string]interface{}{
 		"component": "job_store",
 		"redis_url": redisURL,
 	})
@@ -52,16 +70,18 @@ func (rjs *RedisJobStore) SaveJob(job *Job) error {
 		return fmt.Errorf("failed to marshal job: %v", err)
 	}
 
+	client := rjs.getClient()
+	
 	// Store job with 24-hour TTL
 	key := fmt.Sprintf("job:%s", job.ID)
-	err = rjs.client.Set(rjs.ctx, key, data, 24*time.Hour).Err()
+	err = client.Set(rjs.ctx, key, data, 24*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("failed to save job: %v", err)
 	}
 
 	// Also store in job list for easy querying
 	listKey := "jobs:list"
-	err = rjs.client.ZAdd(rjs.ctx, listKey, redis.Z{
+	err = client.ZAdd(rjs.ctx, listKey, redis.Z{
 		Score:  float64(job.CreatedAt.Unix()),
 		Member: job.ID,
 	}).Err()
@@ -75,7 +95,8 @@ func (rjs *RedisJobStore) SaveJob(job *Job) error {
 // LoadJob retrieves a job by ID from Redis
 func (rjs *RedisJobStore) LoadJob(jobID string) (*Job, bool) {
 	key := fmt.Sprintf("job:%s", jobID)
-	data, err := rjs.client.Get(rjs.ctx, key).Result()
+	client := rjs.getClient()
+	data, err := client.Get(rjs.ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return nil, false
@@ -107,7 +128,8 @@ func (rjs *RedisJobStore) ListJobs(status string, limit int) []*Job {
 
 	// Get job IDs from sorted set (ordered by creation time)
 	listKey := "jobs:list"
-	jobIDs, err := rjs.client.ZRevRange(rjs.ctx, listKey, 0, int64(limit-1)).Result()
+	client := rjs.getClient()
+	jobIDs, err := client.ZRevRange(rjs.ctx, listKey, 0, int64(limit-1)).Result()
 	if err != nil {
 		logger.Error("Failed to get job IDs", map[string]interface{}{
 			"component": "job_store",
@@ -191,16 +213,17 @@ func (rjs *RedisJobStore) UpdateJobContext(jobID string, context map[string]inte
 // DeleteJob removes a job from Redis
 func (rjs *RedisJobStore) DeleteJob(jobID string) error {
 	key := fmt.Sprintf("job:%s", jobID)
+	client := rjs.getClient()
 
 	// Remove from job storage
-	err := rjs.client.Del(rjs.ctx, key).Err()
+	err := client.Del(rjs.ctx, key).Err()
 	if err != nil {
 		return fmt.Errorf("failed to delete job: %v", err)
 	}
 
 	// Remove from job list
 	listKey := "jobs:list"
-	err = rjs.client.ZRem(rjs.ctx, listKey, jobID).Err()
+	err = client.ZRem(rjs.ctx, listKey, jobID).Err()
 	if err != nil {
 		return fmt.Errorf("failed to remove job from list: %v", err)
 	}
@@ -214,7 +237,8 @@ func (rjs *RedisJobStore) CleanupOldJobs(maxAge time.Duration) error {
 
 	// Get all job IDs
 	listKey := "jobs:list"
-	jobIDs, err := rjs.client.ZRange(rjs.ctx, listKey, 0, -1).Result()
+	client := rjs.getClient()
+	jobIDs, err := client.ZRange(rjs.ctx, listKey, 0, -1).Result()
 	if err != nil {
 		return fmt.Errorf("failed to get job IDs: %v", err)
 	}
@@ -325,7 +349,8 @@ func (rjs *RedisJobStore) BackupJobs() error {
 
 	// Store backup in Redis with 7-day TTL
 	backupKey := fmt.Sprintf("backup:%s", time.Now().Format("2006-01-02-15-04-05"))
-	err = rjs.client.Set(rjs.ctx, backupKey, data, 7*24*time.Hour).Err()
+	client := rjs.getClient()
+	err = client.Set(rjs.ctx, backupKey, data, 7*24*time.Hour).Err()
 	if err != nil {
 		return fmt.Errorf("failed to store backup: %v", err)
 	}
@@ -373,18 +398,18 @@ func (rjs *RedisJobStore) RecoverJobs(engine *RuleEngine, webhookManager *Webhoo
 
 // Close closes the Redis connection
 func (rjs *RedisJobStore) Close() error {
-	if rjs.client != nil {
-		logger.Info("Closing Redis job store", map[string]interface{}{
-			"component": "job_store",
-		})
-		return rjs.client.Close()
-	}
+	// Connection pool will be closed when the application shuts down
+	// Individual connections are managed by the pool
+	logger.Info("Closing Redis job store", map[string]interface{}{
+		"component": "job_store",
+	})
 	return nil
 }
 
 // GetDatabaseMetrics returns Redis metrics (simplified)
 func (rjs *RedisJobStore) GetDatabaseMetrics() map[string]interface{} {
-	info, err := rjs.client.Info(rjs.ctx).Result()
+	client := rjs.getClient()
+	info, err := client.Info(rjs.ctx).Result()
 	if err != nil {
 		return map[string]interface{}{
 			"error": err.Error(),
@@ -426,4 +451,12 @@ func (rjs *RedisJobStore) DeleteSchedule(scheduleID string) error {
 func (rjs *RedisJobStore) GetSchedulesDueForExecution() []*JobSchedule {
 	// TODO: Implement schedule execution querying from Redis
 	return []*JobSchedule{}
+}
+
+// getClient returns the appropriate Redis client from the pool
+func (rjs *RedisJobStore) getClient() *redis.Client {
+	if rjs.pool != nil {
+		return rjs.pool.GetClient()
+	}
+	return rjs.client
 }

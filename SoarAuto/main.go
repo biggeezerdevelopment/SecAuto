@@ -183,6 +183,12 @@ func runServer(port string, workerCount int) {
 		}
 	}
 
+	// Initialize Redis connection pool early
+	pool, err := InitializeRedisPool(config)
+	if err != nil {
+		log.Fatalf("Failed to initialize Redis connection pool: %v", err)
+	}
+	
 	// Create Redis integration for metadata management
 	redisIntegration, err := NewRedisIntegration(config)
 	if err != nil {
@@ -391,6 +397,16 @@ func runServer(port string, workerCount int) {
 			"component": "server",
 			"error":     err.Error(),
 		})
+	}
+
+	// Close Redis connection pool
+	if pool != nil {
+		if err := pool.Close(); err != nil {
+			logger.Error("Failed to close Redis connection pool", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+		}
 	}
 
 	jobManager.Cleanup()

@@ -9,32 +9,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// NewRedisIntegration creates a new Redis integration instance
+// NewRedisIntegration creates a new Redis integration instance using connection pooling
 func NewRedisIntegration(config *Config) (*RedisIntegration, error) {
-	// Parse Redis URL from config
-	redisURL := config.Database.RedisURL
-	if redisURL == "" {
-		redisURL = "redis://localhost:6379/0"
-	}
-
-	// Parse Redis URL
-	opts, err := redis.ParseURL(redisURL)
+	// Initialize the global Redis pool if not already done
+	pool, err := InitializeRedisPool(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URL: %v", err)
-	}
-
-	// Create Redis client
-	client := redis.NewClient(opts)
-
-	// Test connection
-	ctx := context.Background()
-	_, err = client.Ping(ctx).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+		return nil, fmt.Errorf("failed to initialize Redis pool: %v", err)
 	}
 
 	return &RedisIntegration{
-		client: client,
+		pool:   pool,
+		client: pool.GetClient(), // Keep client for backward compatibility
 		config: config,
 	}, nil
 }
@@ -48,7 +33,8 @@ func (r *RedisIntegration) GetCache(key string) CacheResponse {
 		"key":       key,
 	})
 
-	value, err := r.client.Get(ctx, key).Result()
+	client := r.getClient()
+	value, err := client.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
 			return CacheResponse{
@@ -110,8 +96,15 @@ func (r *RedisIntegration) SetCache(key string, value interface{}) CacheResponse
 		valueStr = string(jsonBytes)
 	}
 
-	// Set value in Redis
-	err := r.client.Set(ctx, key, valueStr, 0).Err()
+	// Set value in Redis with retry logic
+	var err error
+	if r.pool != nil {
+		err = r.pool.WithRetry(func(client *redis.Client) error {
+			return client.Set(ctx, key, valueStr, 0).Err()
+		}, false)
+	} else {
+		err = r.client.Set(ctx, key, valueStr, 0).Err()
+	}
 	if err != nil {
 		return CacheResponse{
 			Success:      false,
@@ -139,7 +132,8 @@ func (r *RedisIntegration) DeleteCache(key string) CacheResponse {
 		"key":       key,
 	})
 
-	deletedCount, err := r.client.Del(ctx, key).Result()
+	client := r.getClient()
+	deletedCount, err := client.Del(ctx, key).Result()
 	if err != nil {
 		return CacheResponse{
 			Success:      false,
@@ -177,8 +171,9 @@ func (r *RedisIntegration) AddToList(listName string, items []interface{}, posit
 		"position":  position,
 	})
 
+	client := r.getClient()
 	// Get existing items from the list to check for duplicates
-	existingItems, err := r.client.LRange(ctx, listName, 0, -1).Result()
+	existingItems, err := client.LRange(ctx, listName, 0, -1).Result()
 	if err != nil {
 		return ListResponse{
 			Success:      false,
@@ -251,10 +246,10 @@ func (r *RedisIntegration) AddToList(listName string, items []interface{}, posit
 	var addedCount int64
 
 	if position == "left" {
-		addedCount, err = r.client.LPush(ctx, listName, uniqueItems...).Result()
+		addedCount, err = client.LPush(ctx, listName, uniqueItems...).Result()
 	} else {
 		// Default to right
-		addedCount, err = r.client.RPush(ctx, listName, uniqueItems...).Result()
+		addedCount, err = client.RPush(ctx, listName, uniqueItems...).Result()
 	}
 
 	if err != nil {
@@ -290,8 +285,9 @@ func (r *RedisIntegration) GetList(listName string) ListResponse {
 		"list_name": listName,
 	})
 
+	client := r.getClient()
 	// Get all items from the list (0 to -1 means all)
-	items, err := r.client.LRange(ctx, listName, 0, -1).Result()
+	items, err := client.LRange(ctx, listName, 0, -1).Result()
 	if err != nil {
 		return ListResponse{
 			Success:      false,
@@ -332,7 +328,8 @@ func (r *RedisIntegration) DeleteList(listName string) ListResponse {
 		"list_name": listName,
 	})
 
-	deletedCount, err := r.client.Del(ctx, listName).Result()
+	client := r.getClient()
+	deletedCount, err := client.Del(ctx, listName).Result()
 	if err != nil {
 		return ListResponse{
 			Success:      false,
@@ -370,6 +367,7 @@ func (r *RedisIntegration) RemoveFromList(listName string, items []interface{}, 
 		"items":     len(items),
 	})
 
+	client := r.getClient()
 	if count <= 0 {
 		count = 1 // Default to removing 1 occurrence
 	}
@@ -397,7 +395,7 @@ func (r *RedisIntegration) RemoveFromList(listName string, items []interface{}, 
 		}
 
 		// Remove the item from the list
-		removedCount, err := r.client.LRem(ctx, listName, int64(count), itemStr).Result()
+		removedCount, err := client.LRem(ctx, listName, int64(count), itemStr).Result()
 		if err != nil {
 			return ListResponse{
 				Success:      false,
@@ -421,5 +419,15 @@ func (r *RedisIntegration) RemoveFromList(listName string, items []interface{}, 
 
 // Close closes the Redis connection
 func (r *RedisIntegration) Close() error {
-	return r.client.Close()
+	// Connection pool will be closed when the application shuts down
+	// Individual connections are managed by the pool
+	return nil
+}
+
+// getClient returns the appropriate Redis client from the pool
+func (r *RedisIntegration) getClient() *redis.Client {
+	if r.pool != nil {
+		return r.pool.GetClient()
+	}
+	return r.client
 }

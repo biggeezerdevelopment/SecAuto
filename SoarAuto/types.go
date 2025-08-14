@@ -227,7 +227,8 @@ type IntegrationDeleteResponse struct {
 
 // RedisIntegration represents a Redis connection for caching
 type RedisIntegration struct {
-	client *redis.Client
+	pool   *RedisPool
+	client *redis.Client // Kept for backward compatibility
 	config *Config
 }
 
