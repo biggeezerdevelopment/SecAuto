@@ -24,10 +24,12 @@ const (
 
 // StructuredLogger provides structured JSON logging
 type StructuredLogger struct {
-	level      LogLevel
-	dest       string // "stdout", "file", "both"
-	fileWriter io.Writer
-	rotation   *RotationConfig
+	level           LogLevel
+	dest            string // "stdout", "file", "both"
+	fileWriter      io.Writer
+	rotation        *RotationConfig
+	componentLevels map[string]LogLevel
+	performance     *LoggingPerformanceConfig
 }
 
 // LogEntry represents a structured log entry
@@ -60,6 +62,11 @@ type LogEntry struct {
 
 // NewStructuredLogger creates a new structured logger
 func NewStructuredLogger(level LogLevel, dest string, filePath string, rotation *RotationConfig) *StructuredLogger {
+	return NewStructuredLoggerWithConfig(level, dest, filePath, rotation, nil, nil)
+}
+
+// NewStructuredLoggerWithConfig creates a new structured logger with component-specific configuration
+func NewStructuredLoggerWithConfig(level LogLevel, dest string, filePath string, rotation *RotationConfig, componentLevels map[string]string, performance *LoggingPerformanceConfig) *StructuredLogger {
 	var fileWriter io.Writer
 	if dest == "file" || dest == "both" {
 		// Ensure directory exists
@@ -85,25 +92,66 @@ func NewStructuredLogger(level LogLevel, dest string, filePath string, rotation 
 			}
 		}
 	}
-	return &StructuredLogger{level: level, dest: dest, fileWriter: fileWriter, rotation: rotation}
+	// Convert component levels from string to LogLevel
+	compLevels := make(map[string]LogLevel)
+	if componentLevels != nil {
+		for component, levelStr := range componentLevels {
+			compLevels[component] = LogLevel(levelStr)
+		}
+	}
+	
+	// Set default performance config if none provided
+	if performance == nil {
+		performance = &LoggingPerformanceConfig{
+			SkipContextLogging: false,
+			MaxLogFieldLength:  5000,
+			BatchLogging:       false,
+			AsyncLogging:       false,
+		}
+	}
+	
+	return &StructuredLogger{
+		level:           level,
+		dest:            dest,
+		fileWriter:      fileWriter,
+		rotation:        rotation,
+		componentLevels: compLevels,
+		performance:     performance,
+	}
 }
 
-// shouldLog checks if the message should be logged based on level
-func (l *StructuredLogger) shouldLog(level LogLevel) bool {
+// shouldLog checks if the message should be logged based on level and component
+func (l *StructuredLogger) shouldLog(level LogLevel, component string) bool {
 	levels := map[LogLevel]int{
 		LogLevelDebug:   0,
 		LogLevelInfo:    1,
 		LogLevelWarning: 2,
 		LogLevelError:   3,
 	}
+	
+	// Check component-specific level first
+	if component != "" && l.componentLevels != nil {
+		if componentLevel, exists := l.componentLevels[component]; exists {
+			return levels[level] >= levels[componentLevel]
+		}
+		// Check for default component level
+		if defaultLevel, exists := l.componentLevels["default"]; exists {
+			return levels[level] >= levels[defaultLevel]
+		}
+	}
+	
+	// Fall back to global level
 	return levels[level] >= levels[l.level]
 }
 
 // log writes a structured log entry
 func (l *StructuredLogger) log(entry LogEntry) {
-	if !l.shouldLog(LogLevel(entry.Level)) {
+	if !l.shouldLog(LogLevel(entry.Level), entry.Component) {
 		return
 	}
+	
+	// Apply performance optimizations
+	l.optimizeEntry(&entry)
 
 	globalLogMutex.Lock()
 	defer globalLogMutex.Unlock()
@@ -124,6 +172,51 @@ func (l *StructuredLogger) log(entry LogEntry) {
 			l.fileWriter.Write(append(jsonData, '\n'))
 		}
 	}
+}
+
+// optimizeEntry applies performance optimizations to log entries
+func (l *StructuredLogger) optimizeEntry(entry *LogEntry) {
+	if l.performance == nil {
+		return
+	}
+	
+	// Skip context logging if enabled
+	if l.performance.SkipContextLogging && entry.Context != nil {
+		if len(entry.Context) > 5 { // Only skip if context is large
+			entry.Context = map[string]interface{}{"_truncated": "context_skipped_for_performance"}
+		}
+	}
+	
+	// Truncate long field values
+	if l.performance.MaxLogFieldLength > 0 {
+		l.truncateStringFields(entry, l.performance.MaxLogFieldLength)
+	}
+}
+
+// truncateStringFields truncates string fields that exceed the maximum length
+func (l *StructuredLogger) truncateStringFields(entry *LogEntry, maxLength int) {
+	if len(entry.Message) > maxLength {
+		entry.Message = entry.Message[:maxLength] + "...[truncated]"
+	}
+	if len(entry.Error) > maxLength {
+		entry.Error = entry.Error[:maxLength] + "...[truncated]"
+	}
+	if len(entry.Condition) > maxLength {
+		entry.Condition = entry.Condition[:maxLength] + "...[truncated]"
+	}
+	if len(entry.Variable) > maxLength {
+		entry.Variable = entry.Variable[:maxLength] + "...[truncated]"
+	}
+	
+	// Truncate value if it's a string
+	if valueStr, ok := entry.Value.(string); ok && len(valueStr) > maxLength {
+		entry.Value = valueStr[:maxLength] + "...[truncated]"
+	}
+}
+
+// isLogLevelEnabled checks if a specific log level is enabled for a component
+func (l *StructuredLogger) IsLogLevelEnabled(level LogLevel, component string) bool {
+	return l.shouldLog(level, component)
 }
 
 // Debug logs a debug message

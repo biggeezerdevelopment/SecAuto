@@ -76,7 +76,7 @@ func main() {
 		MaxAgeDays: config.Logging.Rotation.MaxAgeDays,
 		Compress:   config.Logging.Rotation.Compress,
 	}
-	logger = NewStructuredLogger(level, dest, file, rotation)
+	logger = NewStructuredLoggerWithConfig(level, dest, file, rotation, config.Logging.ComponentLevels, &config.Logging.Performance)
 
 	// Use config port, but allow command line override if needed
 	configPort := strconv.Itoa(config.Server.Port)

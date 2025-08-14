@@ -43,14 +43,24 @@ type ServerConfig struct {
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
-	Level            string         `yaml:"level"`
-	Destination      string         `yaml:"destination"`
-	File             string         `yaml:"file"`
-	Rotation         RotationConfig `yaml:"rotation"`
-	Format           string         `yaml:"format"`
-	IncludeTimestamp bool           `yaml:"include_timestamp"`
-	IncludeComponent bool           `yaml:"include_component"`
-	IncludeRequestID bool           `yaml:"include_request_id"`
+	Level            string                    `yaml:"level"`
+	Destination      string                    `yaml:"destination"`
+	File             string                    `yaml:"file"`
+	Rotation         RotationConfig            `yaml:"rotation"`
+	Format           string                    `yaml:"format"`
+	IncludeTimestamp bool                      `yaml:"include_timestamp"`
+	IncludeComponent bool                      `yaml:"include_component"`
+	IncludeRequestID bool                      `yaml:"include_request_id"`
+	ComponentLevels  map[string]string         `yaml:"component_levels"`
+	Performance      LoggingPerformanceConfig  `yaml:"performance"`
+}
+
+// LoggingPerformanceConfig holds performance-related logging settings
+type LoggingPerformanceConfig struct {
+	SkipContextLogging   bool `yaml:"skip_context_logging"`
+	MaxLogFieldLength    int  `yaml:"max_log_field_length"`
+	BatchLogging         bool `yaml:"batch_logging"`
+	AsyncLogging         bool `yaml:"async_logging"`
 }
 
 // RotationConfig holds log rotation configuration

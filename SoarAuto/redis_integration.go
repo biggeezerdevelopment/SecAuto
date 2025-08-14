@@ -28,7 +28,8 @@ func NewRedisIntegration(config *Config) (*RedisIntegration, error) {
 func (r *RedisIntegration) GetCache(key string) CacheResponse {
 	ctx := context.Background()
 
-	logger.Info("Getting cache value", map[string]interface{}{
+	// Only log cache operations at DEBUG level for performance
+	logger.Debug("Getting cache value", map[string]interface{}{
 		"component": "redis_integration",
 		"key":       key,
 	})
@@ -72,7 +73,8 @@ func (r *RedisIntegration) GetCache(key string) CacheResponse {
 func (r *RedisIntegration) SetCache(key string, value interface{}) CacheResponse {
 	ctx := context.Background()
 
-	logger.Info("Setting cache value", map[string]interface{}{
+	// Only log cache operations at DEBUG level for performance
+	logger.Debug("Setting cache value", map[string]interface{}{
 		"component": "redis_integration",
 		"key":       key,
 	})
@@ -127,7 +129,8 @@ func (r *RedisIntegration) SetCache(key string, value interface{}) CacheResponse
 func (r *RedisIntegration) DeleteCache(key string) CacheResponse {
 	ctx := context.Background()
 
-	logger.Info("Deleting cache value", map[string]interface{}{
+	// Only log cache operations at DEBUG level for performance
+	logger.Debug("Deleting cache value", map[string]interface{}{
 		"component": "redis_integration",
 		"key":       key,
 	})
@@ -164,11 +167,11 @@ func (r *RedisIntegration) DeleteCache(key string) CacheResponse {
 func (r *RedisIntegration) AddToList(listName string, items []interface{}, position string) ListResponse {
 	ctx := context.Background()
 
-	logger.Info("Adding items to list", map[string]interface{}{
+	// Only log list operations at DEBUG level for performance
+	logger.Debug("Adding items to list", map[string]interface{}{
 		"component": "redis_integration",
 		"list_name": listName,
 		"count":     len(items),
-		"position":  position,
 	})
 
 	client := r.getClient()
@@ -280,7 +283,8 @@ func (r *RedisIntegration) AddToList(listName string, items []interface{}, posit
 func (r *RedisIntegration) GetList(listName string) ListResponse {
 	ctx := context.Background()
 
-	logger.Info("Getting list items", map[string]interface{}{
+	// Only log list operations at DEBUG level for performance
+	logger.Debug("Getting list items", map[string]interface{}{
 		"component": "redis_integration",
 		"list_name": listName,
 	})
@@ -323,7 +327,8 @@ func (r *RedisIntegration) GetList(listName string) ListResponse {
 func (r *RedisIntegration) DeleteList(listName string) ListResponse {
 	ctx := context.Background()
 
-	logger.Info("Deleting list", map[string]interface{}{
+	// Only log list operations at DEBUG level for performance
+	logger.Debug("Deleting list", map[string]interface{}{
 		"component": "redis_integration",
 		"list_name": listName,
 	})
@@ -360,11 +365,11 @@ func (r *RedisIntegration) DeleteList(listName string) ListResponse {
 func (r *RedisIntegration) RemoveFromList(listName string, items []interface{}, count int) ListResponse {
 	ctx := context.Background()
 
-	logger.Info("Removing items from list", map[string]interface{}{
+	// Only log list operations at DEBUG level for performance
+	logger.Debug("Removing items from list", map[string]interface{}{
 		"component": "redis_integration",
 		"list_name": listName,
 		"count":     count,
-		"items":     len(items),
 	})
 
 	client := r.getClient()

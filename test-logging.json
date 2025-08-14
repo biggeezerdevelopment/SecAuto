@@ -1,0 +1,15 @@
+[
+  {
+    "run": "data_enrichment"
+  },
+  {
+    "if": {
+      "conditions": [
+        [">=", {"var": "test_value"}, 50]
+      ],
+      "logic": "and",
+      "true": {"run": "escalate_incident"},
+      "false": {"run": "log_incident"}
+    }
+  }
+]

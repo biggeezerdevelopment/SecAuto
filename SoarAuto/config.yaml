@@ -24,6 +24,21 @@ logging:
   include_timestamp: true
   include_component: true
   include_request_id: true
+  # Component-specific logging levels for performance optimization
+  component_levels:
+    rules_engine: "WARNING"     # Reduce verbosity in production
+    redis_integration: "ERROR"  # Only log errors for Redis operations
+    job_manager: "INFO"         # Normal logging for job management
+    webhook_system: "INFO"      # Normal logging for webhooks
+    plugin_system: "WARNING"    # Reduce plugin execution verbosity
+    cluster_manager: "INFO"     # Normal logging for clustering
+    default: "INFO"             # Default level for unlisted components
+  # Performance settings
+  performance:
+    skip_context_logging: true      # Skip logging large context objects in production
+    max_log_field_length: 1000      # Truncate long field values
+    batch_logging: false            # Enable for high-throughput scenarios
+    async_logging: false            # Enable for better performance (experimental)
 
 # Database Configuration (Redis)
 database:

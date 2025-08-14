@@ -1,0 +1,56 @@
+# SecAuto Configuration File - Production Logging Test
+
+# Server Configuration
+server:
+  port: 9090
+
+# Logging Configuration - Production settings with reduced verbosity
+logging:
+  level: "INFO"
+  destination: "both"
+  file: "logs/secauto.log"
+  rotation:
+    max_size_mb: 10
+    max_backups: 5
+    max_age_days: 30
+    compress: true
+  format: "json"
+  include_timestamp: true
+  include_component: true
+  include_request_id: true
+  # Component-specific logging levels for performance optimization
+  component_levels:
+    rules_engine: "WARNING"     # Significantly reduced verbosity
+    redis_integration: "ERROR"  # Only errors
+    job_manager: "INFO"         # Normal logging
+    webhook_system: "INFO"      # Normal logging  
+    plugin_system: "WARNING"    # Reduced verbosity
+    cluster_manager: "INFO"     # Normal logging
+    default: "INFO"             # Default level
+  # Performance settings
+  performance:
+    skip_context_logging: true      # Skip large context objects
+    max_log_field_length: 1000      # Truncate long fields
+    batch_logging: false            # Disabled for now
+    async_logging: false            # Disabled for now
+
+# Database Configuration (Redis)
+database:
+  redis_url: "redis://localhost:6379/0"
+
+# Minimal other configs for testing
+cluster:
+  enabled: false
+
+security:
+  api_keys:
+    - "test-api-key-2024"
+
+python:
+  venv_path: "../Venv"
+  scripts_path: "../automations"
+  playbooks_path: "../playbooks"
+
+rules_engine:
+  max_nesting_depth: 10
+  max_conditions_per_rule: 50

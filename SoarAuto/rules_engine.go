@@ -28,19 +28,21 @@ func NewRuleEngine(config *Config) *RuleEngine {
 
 // SetContext sets the context for the rule engine
 func (re *RuleEngine) SetContext(context map[string]interface{}) {
-	logger.Info("Setting context", map[string]interface{}{
-		"component": "rules_engine",
-		"context":   context,
-	})
+	// Only log context details at DEBUG level to reduce verbosity
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Setting context", map[string]interface{}{
+			"component":    "rules_engine",
+			"context_keys": len(context),
+		})
+	}
 
 	// Create a single, flat context object
 	re.context = make(map[string]interface{})
 
 	// If context already has a nested structure, extract and merge it
 	if nestedContext, exists := context["context"]; exists {
-		logger.Info("Found nested context", map[string]interface{}{
+		logger.Debug("Found nested context", map[string]interface{}{
 			"component": "rules_engine",
-			"nested":    nestedContext,
 		})
 		if contextMap, ok := nestedContext.(map[string]interface{}); ok {
 			// Merge nested context into flat structure
@@ -49,7 +51,7 @@ func (re *RuleEngine) SetContext(context map[string]interface{}) {
 			}
 		}
 	} else {
-		logger.Info("No nested context found, using direct context", map[string]interface{}{
+		logger.Debug("Using direct context", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		// No nested context, merge all data directly into the flat context
@@ -58,32 +60,12 @@ func (re *RuleEngine) SetContext(context map[string]interface{}) {
 		}
 	}
 
-	logger.Info("Final context", map[string]interface{}{
-		"component":    "rules_engine",
-		"context":      re.context,
-		"context_keys": len(re.context),
-		"has_incident": re.context["incident"] != nil,
-	})
-
-	// Log the incident object specifically
-	if incident, exists := re.context["incident"]; exists {
-		logger.Info("Incident object found", map[string]interface{}{
-			"component":     "rules_engine",
-			"incident":      incident,
-			"incident_type": fmt.Sprintf("%T", incident),
-		})
-		if incidentMap, ok := incident.(map[string]interface{}); ok {
-			logger.Info("Incident map details", map[string]interface{}{
-				"component":         "rules_engine",
-				"incident_keys":     len(incidentMap),
-				"has_threat_score":  incidentMap["threat_score"] != nil,
-				"threat_score":      incidentMap["threat_score"],
-				"threat_score_type": fmt.Sprintf("%T", incidentMap["threat_score"]),
-			})
-		}
-	} else {
-		logger.Info("No incident object found in context", map[string]interface{}{
-			"component": "rules_engine",
+	// Only log detailed context information at DEBUG level
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Context processing completed", map[string]interface{}{
+			"component":    "rules_engine",
+			"context_keys": len(re.context),
+			"has_incident": re.context["incident"] != nil,
 		})
 	}
 }
@@ -107,17 +89,21 @@ func (re *RuleEngine) EvaluateRule(rule interface{}) (interface{}, error) {
 func (re *RuleEngine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error) {
 	var results []interface{}
 
+	// Log at INFO level for playbook start, but only basic info
 	logger.Info("Evaluating playbook", map[string]interface{}{
 		"component":  "rules_engine",
 		"rule_count": len(playbook),
 	})
 
 	for i, rule := range playbook {
-		logger.Info("Evaluating rule", map[string]interface{}{
-			"component":  "rules_engine",
-			"rule_index": i + 1,
-			"rule":       rule,
-		})
+		// Only log individual rule details at DEBUG level
+		if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+			logger.Debug("Evaluating rule", map[string]interface{}{
+				"component":  "rules_engine",
+				"rule_index": i + 1,
+			})
+		}
+		
 		result, err := re.evaluate(rule, re.context)
 		if err != nil {
 			logger.Error("Rule evaluation failed", map[string]interface{}{
@@ -128,42 +114,44 @@ func (re *RuleEngine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, e
 			return nil, fmt.Errorf("error evaluating rule %d: %v", i+1, err)
 		}
 
-		// Handle nested results from play operations
-		logger.Info("Processing rule result", map[string]interface{}{
-			"component":   "rules_engine",
-			"result":      result,
-			"result_type": fmt.Sprintf("%T", result),
-		})
+		// Only log detailed result processing at DEBUG level
+		if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+			logger.Debug("Processing rule result", map[string]interface{}{
+				"component":   "rules_engine",
+				"result_type": fmt.Sprintf("%T", result),
+			})
+		}
 
 		if resultArray, ok := result.([]interface{}); ok {
-			logger.Info("Flattening nested results", map[string]interface{}{
+			logger.Debug("Flattening nested results", map[string]interface{}{
 				"component": "rules_engine",
 				"array_len": len(resultArray),
 			})
 			// Flatten nested results into the main results array
 			results = append(results, resultArray...)
 		} else {
-			logger.Info("Adding single result", map[string]interface{}{
-				"component": "rules_engine",
-			})
 			results = append(results, result)
 		}
 	}
 
+	// Log completion at INFO level
 	logger.Info("Completed playbook evaluation", map[string]interface{}{
-		"component":  "rules_engine",
-		"rule_count": len(playbook),
+		"component":     "rules_engine",
+		"rule_count":    len(playbook),
+		"result_count":  len(results),
 	})
 	return results, nil
 }
 
 // evaluate recursively evaluates JSONLogic expressions
 func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (interface{}, error) {
-	logger.Info("Evaluating expression", map[string]interface{}{
-		"component": "rules_engine",
-		"expr":      expr,
-		"expr_type": fmt.Sprintf("%T", expr),
-	})
+	// Only log expression details at DEBUG level to reduce overhead
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Evaluating expression", map[string]interface{}{
+			"component": "rules_engine",
+			"expr_type": fmt.Sprintf("%T", expr),
+		})
+	}
 
 	if expr == nil {
 		return nil, nil
@@ -172,24 +160,22 @@ func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (i
 	// Process template variables in the expression
 	processedExpr := re.processTemplateVariables(expr, data)
 
-	logger.Info("Template variable processing in evaluate", map[string]interface{}{
-		"component":       "rules_engine",
-		"original_expr":   expr,
-		"processed_expr":  processedExpr,
-		"data_keys":       len(data),
-		"has_virustotal":  data["virustotal"] != nil,
-		"virustotal_type": fmt.Sprintf("%T", data["virustotal"]),
-	})
+	// Only log template processing details at DEBUG level
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Template variable processing completed", map[string]interface{}{
+			"component": "rules_engine",
+			"data_keys": len(data),
+		})
+	}
 
 	switch v := processedExpr.(type) {
 	case map[string]interface{}:
-		logger.Info("Evaluating map operation", map[string]interface{}{
+		logger.Debug("Evaluating map operation", map[string]interface{}{
 			"component": "rules_engine",
-			"operation": v,
 		})
 		return re.evaluateOperation(v, data)
 	case []interface{}:
-		logger.Info("Evaluating array", map[string]interface{}{
+		logger.Debug("Evaluating array", map[string]interface{}{
 			"component": "rules_engine",
 			"array_len": len(v),
 		})
@@ -227,9 +213,9 @@ func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (i
 		}
 		return results, nil
 	default:
-		logger.Info("Evaluating primitive value", map[string]interface{}{
+		// Primitive values don't need logging unless debugging
+		logger.Debug("Evaluating primitive value", map[string]interface{}{
 			"component": "rules_engine",
-			"value":     v,
 			"type":      fmt.Sprintf("%T", v),
 		})
 		return v, nil
@@ -238,35 +224,37 @@ func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (i
 
 // evaluateOperation handles different operation types
 func (re *RuleEngine) evaluateOperation(operation map[string]interface{}, data map[string]interface{}) (interface{}, error) {
-	logger.Info("Evaluating operation", map[string]interface{}{
-		"component": "rules_engine",
-		"operation": operation,
-	})
+	// Only log operation details at DEBUG level
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Evaluating operation", map[string]interface{}{
+			"component": "rules_engine",
+		})
+	}
 
 	// Check for custom operations first
 	if _, exists := operation["run"]; exists {
-		logger.Info("Found run operation", map[string]interface{}{
+		logger.Debug("Found run operation", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		return re.evaluateRunOperation(operation["run"], operation, data)
 	}
 
 	if _, exists := operation["play"]; exists {
-		logger.Info("Found play operation", map[string]interface{}{
+		logger.Debug("Found play operation", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		return re.evaluatePlayOperation(operation["play"], data)
 	}
 
 	if _, exists := operation["if"]; exists {
-		logger.Info("Found if operation", map[string]interface{}{
+		logger.Debug("Found if operation", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		return re.evaluateIfOperation(operation["if"], data)
 	}
 
 	if _, exists := operation["plugin"]; exists {
-		logger.Info("Found plugin operation", map[string]interface{}{
+		logger.Debug("Found plugin operation", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		return re.evaluatePluginOperation(operation["plugin"], data)
@@ -274,7 +262,7 @@ func (re *RuleEngine) evaluateOperation(operation map[string]interface{}, data m
 
 	// Check for variable operations
 	if _, exists := operation["var"]; exists {
-		logger.Info("Found var operation", map[string]interface{}{
+		logger.Debug("Found var operation", map[string]interface{}{
 			"component": "rules_engine",
 		})
 		return re.evaluateVarOperation(operation["var"], data)
@@ -284,7 +272,7 @@ func (re *RuleEngine) evaluateOperation(operation map[string]interface{}, data m
 	for op := range operation {
 		switch op {
 		case "eq", "gt", "lt", "gte", "lte":
-			logger.Info("Found comparison operation", map[string]interface{}{
+			logger.Debug("Found comparison operation", map[string]interface{}{
 				"component": "rules_engine",
 				"operator":  op,
 			})
@@ -296,7 +284,7 @@ func (re *RuleEngine) evaluateOperation(operation map[string]interface{}, data m
 	for op := range operation {
 		switch op {
 		case "and", "or", "not":
-			logger.Info("Found logical operation", map[string]interface{}{
+			logger.Debug("Found logical operation", map[string]interface{}{
 				"component": "rules_engine",
 				"operator":  op,
 			})
@@ -348,14 +336,13 @@ func (re *RuleEngine) evaluateRunOperation(scriptName interface{}, operation map
 		}
 	}
 
-	logger.Info("Template variable processing", map[string]interface{}{
-		"component":      "rules_engine",
-		"original_data":  data,
-		"processed_data": processedData,
-		"has_urls":       processedData["urls"] != nil,
-		"urls_type":      fmt.Sprintf("%T", processedData["urls"]),
-		"urls_value":     processedData["urls"],
-	})
+	// Only log template processing details at DEBUG level
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
+		logger.Debug("Template variable processing", map[string]interface{}{
+			"component": "rules_engine",
+			"has_urls":  processedData["urls"] != nil,
+		})
+	}
 
 	// Pass the processed context to Python scripts
 	outputBytes, err := RunPythonFromVenvWithJSONSeparateOutput(re.config.GetVenvPath(), scriptPath, processedData)
@@ -528,6 +515,7 @@ func (re *RuleEngine) evaluatePluginOperation(pluginExpr interface{}, data map[s
 		return nil, fmt.Errorf("invalid plugin expression: expected string or object")
 	}
 
+	// Only log plugin execution at INFO level for important operations
 	logger.Info("Executing plugin", map[string]interface{}{
 		"component": "rules_engine",
 		"plugin":    pluginName,
@@ -744,18 +732,17 @@ func (re *RuleEngine) evaluateVarOperation(varName interface{}, data map[string]
 		return nil, fmt.Errorf("variable name must be a string")
 	}
 
-	logger.Info("Looking for variable", map[string]interface{}{
+	// Only log variable lookup details at DEBUG level
+	logger.Debug("Looking for variable", map[string]interface{}{
 		"component": "rules_engine",
 		"variable":  varNameStr,
-		"data":      data,
 	})
 
 	// Check if it's a direct context access
 	if varNameStr == "context" {
-		logger.Info("Found context variable", map[string]interface{}{
+		logger.Debug("Found context variable", map[string]interface{}{
 			"component": "rules_engine",
 			"variable":  varNameStr,
-			"value":     data,
 		})
 		return data, nil
 	}
