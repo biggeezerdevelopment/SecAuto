@@ -2,5 +2,5 @@
   {
     "run": "set_qualys_count",
     "count": "{{ServiceResponse.count.#text}}"
-}
+  }
 ] 
