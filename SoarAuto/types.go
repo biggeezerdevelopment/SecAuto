@@ -10,8 +10,8 @@ type PythonOutput struct {
 	Incident map[string]interface{} `json:"incident"`
 }
 
-// SecAutoServer represents the SOAR automation server
-type SecAutoServer struct {
+// LegacySecAutoServer represents the original SOAR automation server (renamed to avoid conflicts)
+type LegacySecAutoServer struct {
 	engine                   *RuleEngine
 	port                     string
 	jobManager               *JobManager
