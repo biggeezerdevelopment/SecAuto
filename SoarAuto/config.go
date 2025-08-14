@@ -253,14 +253,29 @@ type PythonConfig struct {
 
 // RulesEngineConfig holds rules engine configuration
 type RulesEngineConfig struct {
-	MaxNestingDepth        int  `yaml:"max_nesting_depth"`
-	MaxConditionsPerRule   int  `yaml:"max_conditions_per_rule"`
-	MaxVariablesPerContext int  `yaml:"max_variables_per_context"`
-	EnableDebugMode        bool `yaml:"enable_debug_mode"`
-	StrictMode             bool `yaml:"strict_mode"`
-	AllowCustomFunctions   bool `yaml:"allow_custom_functions"`
-	MaxExecutionTime       int  `yaml:"max_execution_time"`
-	MemoryLimit            int  `yaml:"memory_limit"`
+	MaxNestingDepth        int                     `yaml:"max_nesting_depth"`
+	MaxConditionsPerRule   int                     `yaml:"max_conditions_per_rule"`
+	MaxVariablesPerContext int                     `yaml:"max_variables_per_context"`
+	EnableDebugMode        bool                    `yaml:"enable_debug_mode"`
+	StrictMode             bool                    `yaml:"strict_mode"`
+	AllowCustomFunctions   bool                    `yaml:"allow_custom_functions"`
+	MaxExecutionTime       int                     `yaml:"max_execution_time"`
+	MemoryLimit            int                     `yaml:"memory_limit"`
+	Caching                RulesEngineCacheConfig  `yaml:"caching"`
+}
+
+// RulesEngineCacheConfig holds caching configuration for the rules engine
+type RulesEngineCacheConfig struct {
+	MaxContexts           int    `yaml:"max_contexts"`
+	MaxExpressions        int    `yaml:"max_expressions"`
+	MaxVariables          int    `yaml:"max_variables"`
+	ContextTTL            string `yaml:"context_ttl"`
+	ExpressionTTL         string `yaml:"expression_ttl"`
+	VariableTTL           string `yaml:"variable_ttl"`
+	CleanupInterval       string `yaml:"cleanup_interval"`
+	EnableLazyEval        bool   `yaml:"enable_lazy_eval"`
+	EnableExpressionCache bool   `yaml:"enable_expression_cache"`
+	MaxFieldSize          int    `yaml:"max_field_size"`
 }
 
 // MonitoringConfig holds monitoring configuration

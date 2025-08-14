@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -14,23 +15,75 @@ import (
 type RuleEngine struct {
 	config        *Config
 	context       map[string]interface{}
+	contextHash   string
 	pluginManager *PlatformPluginManager
+	cache         *ContextCache
 }
 
 // NewRuleEngine creates a new rule engine instance
 func NewRuleEngine(config *Config) *RuleEngine {
+	// Create cache configuration from rules engine config
+	cacheConfig := &CacheConfig{
+		MaxContexts:           config.RulesEngine.Caching.MaxContexts,
+		MaxExpressions:        config.RulesEngine.Caching.MaxExpressions,
+		MaxVariables:          config.RulesEngine.Caching.MaxVariables,
+		EnableLazyEval:        config.RulesEngine.Caching.EnableLazyEval,
+		EnableExpressionCache: config.RulesEngine.Caching.EnableExpressionCache,
+		MaxFieldSize:          config.RulesEngine.Caching.MaxFieldSize,
+	}
+	
+	// Parse duration strings
+	if contextTTL, err := time.ParseDuration(config.RulesEngine.Caching.ContextTTL); err == nil {
+		cacheConfig.ContextTTL = contextTTL
+	} else {
+		cacheConfig.ContextTTL = 30 * time.Minute // Default
+	}
+	
+	if exprTTL, err := time.ParseDuration(config.RulesEngine.Caching.ExpressionTTL); err == nil {
+		cacheConfig.ExpressionTTL = exprTTL
+	} else {
+		cacheConfig.ExpressionTTL = 15 * time.Minute // Default
+	}
+	
+	if varTTL, err := time.ParseDuration(config.RulesEngine.Caching.VariableTTL); err == nil {
+		cacheConfig.VariableTTL = varTTL
+	} else {
+		cacheConfig.VariableTTL = 10 * time.Minute // Default
+	}
+	
+	if cleanupInterval, err := time.ParseDuration(config.RulesEngine.Caching.CleanupInterval); err == nil {
+		cacheConfig.CleanupInterval = cleanupInterval
+	} else {
+		cacheConfig.CleanupInterval = 5 * time.Minute // Default
+	}
+
 	return &RuleEngine{
 		config:        config,
 		context:       make(map[string]interface{}),
 		pluginManager: nil, // Will be set by SetPluginManager
+		cache:         NewContextCache(cacheConfig),
 	}
 }
 
-// SetContext sets the context for the rule engine
+// SetContext sets the context for the rule engine with caching support
 func (re *RuleEngine) SetContext(context map[string]interface{}) {
+	// Check if we already have this context cached
+	contextHash := re.cache.hashContext(context)
+	if cachedContext, exists := re.cache.GetContext(contextHash); exists {
+		// Use cached context
+		re.context = cachedContext.Data
+		re.contextHash = contextHash
+		logger.Debug("Using cached context", map[string]interface{}{
+			"component":  "rules_engine",
+			"cache_hash": contextHash[:8], // First 8 chars for debugging
+			"use_count":  cachedContext.UseCount,
+		})
+		return
+	}
+
 	// Only log context details at DEBUG level to reduce verbosity
 	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
-		logger.Debug("Setting context", map[string]interface{}{
+		logger.Debug("Setting new context", map[string]interface{}{
 			"component":    "rules_engine",
 			"context_keys": len(context),
 		})
@@ -60,11 +113,15 @@ func (re *RuleEngine) SetContext(context map[string]interface{}) {
 		}
 	}
 
+	// Store processed context in cache
+	re.contextHash = re.cache.StoreContext(re.context)
+
 	// Only log detailed context information at DEBUG level
 	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
 		logger.Debug("Context processing completed", map[string]interface{}{
 			"component":    "rules_engine",
 			"context_keys": len(re.context),
+			"cache_hash":   re.contextHash[:8], // First 8 chars for debugging
 			"has_incident": re.context["incident"] != nil,
 		})
 	}
@@ -73,6 +130,23 @@ func (re *RuleEngine) SetContext(context map[string]interface{}) {
 // GetContext returns the current context
 func (re *RuleEngine) GetContext() map[string]interface{} {
 	return re.context
+}
+
+// GetCacheStats returns cache performance statistics
+func (re *RuleEngine) GetCacheStats() CacheStats {
+	return re.cache.GetStats()
+}
+
+// ClearCache clears all cached data
+func (re *RuleEngine) ClearCache() {
+	re.cache.Clear()
+}
+
+// Close properly shuts down the rules engine and its cache
+func (re *RuleEngine) Close() {
+	if re.cache != nil {
+		re.cache.Close()
+	}
 }
 
 // SetPluginManager sets the plugin manager for the rule engine
@@ -143,18 +217,32 @@ func (re *RuleEngine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, e
 	return results, nil
 }
 
-// evaluate recursively evaluates JSONLogic expressions
+// evaluate recursively evaluates JSONLogic expressions with caching
 func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (interface{}, error) {
+	if expr == nil {
+		return nil, nil
+	}
+
+	// Check expression cache first
+	exprHash := re.cache.HashExpression(expr, re.contextHash)
+	if cachedExpr, exists := re.cache.GetExpression(exprHash); exists {
+		logger.Debug("Using cached expression result", map[string]interface{}{
+			"component":  "rules_engine",
+			"cache_hash": exprHash[:8],
+			"use_count":  cachedExpr.UseCount,
+		})
+		if cachedExpr.Error != "" {
+			return nil, fmt.Errorf("%s", cachedExpr.Error)
+		}
+		return cachedExpr.Result, nil
+	}
+
 	// Only log expression details at DEBUG level to reduce overhead
 	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") {
-		logger.Debug("Evaluating expression", map[string]interface{}{
+		logger.Debug("Evaluating new expression", map[string]interface{}{
 			"component": "rules_engine",
 			"expr_type": fmt.Sprintf("%T", expr),
 		})
-	}
-
-	if expr == nil {
-		return nil, nil
 	}
 
 	// Process template variables in the expression
@@ -167,6 +255,18 @@ func (re *RuleEngine) evaluate(expr interface{}, data map[string]interface{}) (i
 			"data_keys": len(data),
 		})
 	}
+
+	// Evaluate the expression
+	result, err := re.evaluateExpression(processedExpr, data)
+	
+	// Cache the result (including errors)
+	re.cache.StoreExpression(exprHash, result, err)
+	
+	return result, err
+}
+
+// evaluateExpression performs the actual expression evaluation
+func (re *RuleEngine) evaluateExpression(processedExpr interface{}, data map[string]interface{}) (interface{}, error) {
 
 	switch v := processedExpr.(type) {
 	case map[string]interface{}:
@@ -725,54 +825,52 @@ func (re *RuleEngine) evaluateObjectBasedIf(ifMap map[string]interface{}, data m
 	return nil, nil
 }
 
-// evaluateVarOperation handles the "var" operation
+// evaluateVarOperation handles the "var" operation with lazy evaluation
 func (re *RuleEngine) evaluateVarOperation(varName interface{}, data map[string]interface{}) (interface{}, error) {
 	varNameStr, ok := varName.(string)
 	if !ok {
 		return nil, fmt.Errorf("variable name must be a string")
 	}
 
-	// Only log variable lookup details at DEBUG level
-	logger.Debug("Looking for variable", map[string]interface{}{
-		"component": "rules_engine",
-		"variable":  varNameStr,
-	})
-
-	// Check if it's a direct context access
-	if varNameStr == "context" {
-		logger.Debug("Found context variable", map[string]interface{}{
+	// Create or get lazy variable
+	lazyVar := re.cache.GetOrCreateLazyVariable(varNameStr, re.contextHash, func() (interface{}, error) {
+		// Only log variable lookup details at DEBUG level
+		logger.Debug("Evaluating lazy variable", map[string]interface{}{
 			"component": "rules_engine",
 			"variable":  varNameStr,
 		})
-		return data, nil
-	}
 
-	// Check if it's a direct access to a key in context
-	if value, exists := data[varNameStr]; exists {
-		logger.Debug("Found variable in context", map[string]interface{}{
+		// Check if it's a direct context access
+		if varNameStr == "context" {
+			return data, nil
+		}
+
+		// Check if it's a direct access to a key in context
+		if value, exists := data[varNameStr]; exists {
+			return value, nil
+		}
+
+		// Check if it's a dot notation access (e.g., "context.incident.id")
+		if value, err := re.evaluateDotNotation(varNameStr, data); err == nil && value != nil {
+			return value, nil
+		}
+
+		// Variable not found
+		return nil, nil
+	})
+
+	// Evaluate the lazy variable
+	result, err := lazyVar.Evaluate()
+	
+	if logger.IsLogLevelEnabled(LogLevelDebug, "rules_engine") && lazyVar.UseCount == 1 {
+		logger.Debug("Variable evaluation result", map[string]interface{}{
 			"component": "rules_engine",
 			"variable":  varNameStr,
-			"value":     value,
+			"found":     result != nil,
 		})
-		return value, nil
 	}
 
-	// Check if it's a dot notation access (e.g., "context.incident.id")
-	if value, err := re.evaluateDotNotation(varNameStr, data); err == nil && value != nil {
-		logger.Debug("Found variable via dot notation", map[string]interface{}{
-			"component":  "rules_engine",
-			"variable":   varNameStr,
-			"value":      value,
-			"value_type": fmt.Sprintf("%T", value),
-		})
-		return value, nil
-	}
-
-	logger.Debug("Variable not found", map[string]interface{}{
-		"component": "rules_engine",
-		"variable":  varNameStr,
-	})
-	return nil, nil
+	return result, err
 }
 
 // evaluateDotNotation handles dot notation for nested access

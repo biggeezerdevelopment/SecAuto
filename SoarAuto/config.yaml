@@ -226,6 +226,18 @@ rules_engine:
   allow_custom_functions: true
   max_execution_time: 300
   memory_limit: 512
+  # Context caching and lazy evaluation settings
+  caching:
+    max_contexts: 1000
+    max_expressions: 5000
+    max_variables: 2000
+    context_ttl: "30m"
+    expression_ttl: "15m"
+    variable_ttl: "10m"
+    cleanup_interval: "5m"
+    enable_lazy_eval: true
+    enable_expression_cache: true
+    max_field_size: 10000
 
 # Monitoring Configuration
 monitoring:

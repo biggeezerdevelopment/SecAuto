@@ -277,6 +277,10 @@ func runServer(port string, workerCount int) {
 	http.HandleFunc("/automation/metadata", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationMetadataHandler))))))
 	http.HandleFunc("/automation/metadata/", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.automationMetadataItemHandler))))))
 
+	// Cache statistics and management endpoints
+	http.HandleFunc("/cache/stats", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheStatsHandler))))))
+	http.HandleFunc("/cache/clear", corsMiddleware(loggingMiddleware(validationMiddleware(validator)(rateLimitMiddleware(rateLimiter)(apiKeyAuthMiddleware(server.cacheClearHandler))))))
+
 	// Swagger UI documentation routes (no auth required, but with CORS)
 	http.HandleFunc("/docs", corsMiddleware(swaggerHandler.ServeHTTP))
 	http.HandleFunc("/docs/", corsMiddleware(swaggerHandler.ServeHTTP))
@@ -4346,4 +4350,129 @@ func (s *SecAutoServer) automationMetadataItemHandler(w http.ResponseWriter, r *
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// cacheStatsHandler handles cache statistics requests
+func (s *SecAutoServer) cacheStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.engine.cache == nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"error":     "Rules engine cache not available",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get cache statistics
+	stats := s.engine.cache.GetStats()
+	
+	// Calculate hit rates
+	var contextHitRate, expressionHitRate, variableHitRate float64
+	
+	if stats.ContextHits+stats.ContextMisses > 0 {
+		contextHitRate = float64(stats.ContextHits) / float64(stats.ContextHits+stats.ContextMisses) * 100
+	}
+	
+	if stats.ExpressionHits+stats.ExpressionMisses > 0 {
+		expressionHitRate = float64(stats.ExpressionHits) / float64(stats.ExpressionHits+stats.ExpressionMisses) * 100
+	}
+	
+	if stats.VariableHits+stats.VariableMisses > 0 {
+		variableHitRate = float64(stats.VariableHits) / float64(stats.VariableHits+stats.VariableMisses) * 100
+	}
+
+	response := map[string]interface{}{
+		"success":   true,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"cache_stats": map[string]interface{}{
+			"contexts": map[string]interface{}{
+				"hits":     stats.ContextHits,
+				"misses":   stats.ContextMisses,
+				"hit_rate": contextHitRate,
+				"evicted":  stats.EvictedContexts,
+			},
+			"expressions": map[string]interface{}{
+				"hits":     stats.ExpressionHits,
+				"misses":   stats.ExpressionMisses,
+				"hit_rate": expressionHitRate,
+				"evicted":  stats.EvictedExpressions,
+			},
+			"variables": map[string]interface{}{
+				"hits":     stats.VariableHits,
+				"misses":   stats.VariableMisses,
+				"hit_rate": variableHitRate,
+				"evicted":  stats.EvictedVariables,
+			},
+			"total_size":    stats.TotalSize,
+			"cleanup_runs":  stats.CleanupRuns,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+
+	logger.Info("Cache statistics retrieved", map[string]interface{}{
+		"component":           "server",
+		"context_hit_rate":    contextHitRate,
+		"expression_hit_rate": expressionHitRate,
+		"variable_hit_rate":   variableHitRate,
+		"total_size":          stats.TotalSize,
+	})
+}
+
+// cacheClearHandler handles cache clearing requests
+func (s *SecAutoServer) cacheClearHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.engine.cache == nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"error":     "Rules engine cache not available",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get statistics before clearing
+	statsBefore := s.engine.cache.GetStats()
+
+	// Clear the cache
+	s.engine.cache.Clear()
+
+	response := map[string]interface{}{
+		"success":   true,
+		"message":   "Cache cleared successfully",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"cleared_stats": map[string]interface{}{
+			"contexts_cleared":    statsBefore.ContextHits + statsBefore.ContextMisses,
+			"expressions_cleared": statsBefore.ExpressionHits + statsBefore.ExpressionMisses,
+			"variables_cleared":   statsBefore.VariableHits + statsBefore.VariableMisses,
+			"memory_freed":        statsBefore.TotalSize,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+
+	logger.Info("Cache cleared", map[string]interface{}{
+		"component":           "server",
+		"contexts_cleared":    statsBefore.ContextHits + statsBefore.ContextMisses,
+		"expressions_cleared": statsBefore.ExpressionHits + statsBefore.ExpressionMisses,
+		"variables_cleared":   statsBefore.VariableHits + statsBefore.VariableMisses,
+		"memory_freed":        statsBefore.TotalSize,
+	})
 }
