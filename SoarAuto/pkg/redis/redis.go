@@ -80,8 +80,14 @@ func (r *RedisClient) GetCache(key string) types.CacheResponse {
 	}
 }
 
-// SetCache stores a value in Redis cache
+// SetCache stores a value in Redis cache with no expiration
 func (r *RedisClient) SetCache(key string, value interface{}) types.CacheResponse {
+	return r.SetCacheWithTTL(key, value, 0)
+}
+
+// SetCacheWithTTL stores a value in Redis cache with optional TTL (time to live)
+// ttl is in seconds, 0 means no expiration
+func (r *RedisClient) SetCacheWithTTL(key string, value interface{}, ttl int) types.CacheResponse {
 	ctx := context.Background()
 	
 	// Convert value to string
@@ -102,7 +108,13 @@ func (r *RedisClient) SetCache(key string, value interface{}) types.CacheRespons
 		valueStr = string(jsonBytes)
 	}
 	
-	err := r.client.Set(ctx, key, valueStr, 0).Err()
+	// Convert TTL to duration (0 means no expiration)
+	var expiration time.Duration
+	if ttl > 0 {
+		expiration = time.Duration(ttl) * time.Second
+	}
+	
+	err := r.client.Set(ctx, key, valueStr, expiration).Err()
 	if err != nil {
 		return types.CacheResponse{
 			Success:      false,
@@ -112,11 +124,18 @@ func (r *RedisClient) SetCache(key string, value interface{}) types.CacheRespons
 		}
 	}
 	
+	var message string
+	if ttl > 0 {
+		message = fmt.Sprintf("Value stored successfully with TTL of %d seconds", ttl)
+	} else {
+		message = "Value stored successfully with no expiration"
+	}
+	
 	return types.CacheResponse{
 		Success:   true,
 		Key:       key,
 		Value:     value,
-		Message:   "Value stored successfully",
+		Message:   message,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 }

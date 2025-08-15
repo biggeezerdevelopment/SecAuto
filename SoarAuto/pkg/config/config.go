@@ -74,6 +74,11 @@ type RotationConfig struct {
 // DatabaseConfig holds database configuration
 type DatabaseConfig struct {
 	RedisURL string `yaml:"redis_url"` // Redis connection URL
+	
+	// TTL settings for different types of data (in seconds)
+	CacheTTL      int `yaml:"cache_ttl"`       // Default TTL for cache entries (0 = no expiration)
+	JobTTL        int `yaml:"job_ttl"`         // TTL for completed/failed jobs (0 = no expiration)
+	TempDataTTL   int `yaml:"temp_data_ttl"`   // TTL for temporary data (0 = no expiration)
 }
 
 // ClusterConfig holds distributed cluster configuration
@@ -90,6 +95,10 @@ type ClusterConfig struct {
 	HeartbeatInterval   int    `yaml:"heartbeat_interval"`
 	ElectionTimeout     int    `yaml:"election_timeout"`
 	JobTimeout          int    `yaml:"job_timeout"`
+	JobStorageTTL       int    `yaml:"job_storage_ttl"`      // TTL for job storage in Redis (seconds, 0 = no expiration)
+	RunningJobTTL       int    `yaml:"running_job_ttl"`      // TTL for running jobs (seconds, 0 = no expiration)
+	CompletedJobTTL     int    `yaml:"completed_job_ttl"`    // TTL for completed jobs (seconds, 0 = no expiration)
+	FailedJobTTL        int    `yaml:"failed_job_ttl"`       // TTL for failed jobs (seconds, 0 = no expiration)
 	MaxRetries          int    `yaml:"max_retries"`
 	RetryDelay          int    `yaml:"retry_delay"`
 	LoadBalancing       string `yaml:"load_balancing"`
@@ -155,6 +164,7 @@ type PluginsConfig struct {
 // SecurityConfig holds security configuration
 type SecurityConfig struct {
 	APIKeys                  []string              `yaml:"api_keys"`
+	APIKeysFile              string                `yaml:"api_keys_file"`
 	IntegrationEncryptionKey string                `yaml:"integration_encryption_key"`
 	RateLimiting             RateLimitingConfig    `yaml:"rate_limiting"`
 	InputValidation          InputValidationConfig `yaml:"input_validation"`
@@ -366,6 +376,8 @@ type DiscordConfig struct {
 
 // IntegrationsConfig holds integration configuration
 type IntegrationsConfig struct {
+	ConfigsPath  string             `yaml:"configs_path"`
+	ScriptsPath  string             `yaml:"scripts_path"`
 	ExternalAPIs ExternalAPIsConfig `yaml:"external_apis"`
 	FileSystems  FileSystemsConfig  `yaml:"file_systems"`
 	Network      NetworkConfig      `yaml:"network"`
@@ -423,6 +435,14 @@ func LoadConfig(configPath string) (*Config, error) {
 		},
 		Database: DatabaseConfig{
 			RedisURL: "redis://localhost:6379/0",
+		},
+		Integrations: IntegrationsConfig{
+			ConfigsPath: "data/integrations/configs",
+			ScriptsPath: "data/integrations/scripts",
+		},
+		Security: SecurityConfig{
+			APIKeys:     []string{"secauto-default-key-2024"},
+			APIKeysFile: "data/security/api_keys.json",
 		},
 		// ... (rest of defaults would be here, abbreviated for brevity)
 	}

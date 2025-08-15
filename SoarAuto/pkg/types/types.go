@@ -404,6 +404,64 @@ const (
 	ScheduleStatusAll      ScheduleStatus = ""
 )
 
+// API Key types for authentication management
+type APIKey struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	CreatedBy   string `json:"created_by"`
+	Active      bool   `json:"active"`
+	Source      string `json:"source"` // "config" or "api"
+	LastUsed    string `json:"last_used,omitempty"`
+}
+
+type APIKeySummary struct {
+	KeyPrefix   string `json:"key_prefix"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	CreatedBy   string `json:"created_by"`
+	Active      bool   `json:"active"`
+	Source      string `json:"source"`
+	LastUsed    string `json:"last_used,omitempty"`
+}
+
+type APIKeyCreateRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type APIKeyCreateResponse struct {
+	Success   bool    `json:"success"`
+	Message   string  `json:"message"`
+	APIKey    *APIKey `json:"api_key,omitempty"`
+	Timestamp string  `json:"timestamp"`
+}
+
+type APIKeyListResponse struct {
+	Success   bool             `json:"success"`
+	Message   string           `json:"message"`
+	APIKeys   []*APIKeySummary `json:"api_keys"`
+	Count     int              `json:"count"`
+	Timestamp string           `json:"timestamp"`
+}
+
+type APIKeyStats struct {
+	Total         int `json:"total"`
+	Active        int `json:"active"`
+	Inactive      int `json:"inactive"`
+	ConfigKeys    int `json:"config_keys"`
+	GeneratedKeys int `json:"generated_keys"`
+}
+
+type APIKeyStatsResponse struct {
+	Success   bool         `json:"success"`
+	Message   string       `json:"message"`
+	Stats     *APIKeyStats `json:"stats"`
+	Timestamp string       `json:"timestamp"`
+}
+
 // Cache operation response types
 type CacheResponse struct {
 	Success      bool        `json:"success"`

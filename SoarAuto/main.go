@@ -7,17 +7,21 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"SoarAuto/pkg/auth"
 	"SoarAuto/pkg/automations"
 	"SoarAuto/pkg/cluster"
 	"SoarAuto/pkg/config"
 	"SoarAuto/pkg/integrations"
 	"SoarAuto/pkg/jobs"
 	"SoarAuto/pkg/logger"
+	"SoarAuto/pkg/playbooks"
 	"SoarAuto/pkg/redis"
 	"SoarAuto/pkg/rules"
 	"SoarAuto/pkg/schedules"
@@ -40,6 +44,8 @@ type SecAutoServer struct {
 	automationManager        *automations.AutomationManager
 	clusterManager           *cluster.ClusterManager
 	scheduleManager          *schedules.ScheduleManager
+	playbookManager          *playbooks.PlaybookManager
+	apiKeyManager            *auth.APIKeyManager
 }
 
 // NewSecAutoServer creates a new server instance
@@ -78,14 +84,20 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		return nil, fmt.Errorf("failed to create Swagger handler: %v", err)
 	}
 
-	// Create job store and manager
-	jobStore := jobs.NewJobStore(redisClient)
+	// Create job store with TTL configuration and manager
+	jobStore := jobs.NewJobStoreWithConfig(
+		redisClient,
+		cfg.Cluster.RunningJobTTL,   // TTL for running jobs
+		cfg.Cluster.CompletedJobTTL, // TTL for completed jobs
+		cfg.Cluster.FailedJobTTL,    // TTL for failed jobs
+		cfg.Cluster.JobStorageTTL,   // Default TTL
+	)
 	jobManager := jobs.NewJobManager(jobStore)
 
 	// Create integration manager
 	integrationManager := integrations.NewIntegrationManager(
-		filepath.Join("data", "integrations", "configs"),
-		filepath.Join("data", "integrations", "scripts"),
+		cfg.Integrations.ConfigsPath,
+		cfg.Integrations.ScriptsPath,
 	)
 
 	// Create client integration manager
@@ -100,9 +112,13 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		filepath.Join("data", "automations", "metadata"),
 	)
 
-	// Create cluster manager
-	clusterManager := cluster.NewClusterManager("node-modular-1")
-	clusterManager.StartClusterServices()
+	// Create playbook manager
+	playbookManager := playbooks.NewPlaybookManager(
+		filepath.Join("data", "playbooks"),
+	)
+
+	// Create cluster manager (will be set after server creation)
+	var clusterManager *cluster.ClusterManager
 
 	// Create server instance for schedule manager (implements JobExecutor interface)
 	server := &SecAutoServer{
@@ -117,7 +133,13 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		clientIntegrationManager: clientIntegrationManager,
 		automationManager:        automationManager,
 		clusterManager:           clusterManager,
+		playbookManager:          playbookManager,
 	}
+
+	// Create cluster manager now that we have the server
+	clusterManager = cluster.NewClusterManager("node-modular-1", jobManager, server, lgr)
+	server.clusterManager = clusterManager
+	clusterManager.StartClusterServices()
 
 	// Create schedule manager (needs server for job execution)
 	scheduleManager := schedules.NewScheduleManager(
@@ -126,7 +148,59 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 	)
 	server.scheduleManager = scheduleManager
 
+	// Create API key manager
+	apiKeyManager := auth.NewAPIKeyManager(
+		cfg.Security.APIKeysFile,
+		cfg.Security.APIKeys,
+	)
+	server.apiKeyManager = apiKeyManager
+
 	return server, nil
+}
+
+// authMiddleware provides API key authentication for all endpoints
+func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip authentication for health endpoint
+		if r.URL.Path == "/health" || r.URL.Path == "/docs" || strings.HasPrefix(r.URL.Path, "/docs/") {
+			next(w, r)
+			return
+		}
+
+		// Get API key from header or query parameter
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			apiKey = r.URL.Query().Get("api_key")
+		}
+
+		if apiKey == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":   false,
+				"message":   "API key required. Provide X-API-Key header or api_key query parameter",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+
+		if !s.apiKeyManager.IsValidKey(apiKey) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid API key",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+
+		// Update last used timestamp
+		s.apiKeyManager.UpdateLastUsed(apiKey)
+
+		// Call the next handler
+		next(w, r)
+	}
 }
 
 // ExecutePlaybook implements the JobExecutor interface for scheduled jobs
@@ -761,25 +835,1588 @@ func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(response)
 }
 
+// clusterHandler handles cluster information requests
+func (s *SecAutoServer) clusterHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get cluster information
+	clusterInfo := s.clusterManager.GetClusterInfo()
+
+	// Create response
+	response := map[string]interface{}{
+		"success":   true,
+		"cluster":   clusterInfo,
+		"message":   "Cluster information retrieved successfully",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Cluster information retrieved", map[string]interface{}{
+		"component":   "server",
+		"remote_addr": r.RemoteAddr,
+	})
+}
+
+// clusterJobsHandler handles distributed job submissions and listings
+func (s *SecAutoServer) clusterJobsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List cluster jobs (for now, return basic info)
+		response := map[string]interface{}{
+			"success": true,
+			"jobs":    []interface{}{}, // Would be populated with actual cluster jobs
+			"total":   0,
+			"message": "Cluster jobs retrieved successfully", 
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost:
+		// Submit job to distributed queue
+		var req types.PlaybookRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Validate the request
+		validation := s.validator.ValidatePlaybookRequest(&req)
+		if !validation.Valid {
+			response := types.ValidationResponse{
+				Success:   false,
+				Valid:     false,
+				Errors:    validation.Errors,
+				Message:   "Validation failed",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Determine playbook to submit
+		var playbook interface{}
+		if req.Playbook != nil {
+			playbook = req.Playbook
+		} else if req.PlaybookName != "" {
+			// For cluster jobs, we'd need to load the playbook file
+			// For now, create a simple reference
+			playbook = map[string]interface{}{
+				"type": "playbook_reference",
+				"name": req.PlaybookName,
+			}
+		} else {
+			http.Error(w, "No playbook or playbook_name provided", http.StatusBadRequest)
+			return
+		}
+
+		// Submit to cluster
+		jobID, err := s.clusterManager.SubmitJob(playbook, req.Context)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to submit job to cluster: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"job_id":    jobID,
+			"message":   "Job submitted to cluster successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Job submitted to cluster", map[string]interface{}{
+			"component": "server",
+			"job_id":    jobID,
+			"has_context": req.Context != nil,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// clusterJobHandler handles individual distributed job operations
+func (s *SecAutoServer) clusterJobHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract job ID from URL path
+	jobID := strings.TrimPrefix(r.URL.Path, "/cluster/jobs/")
+	if jobID == "" {
+		http.Error(w, "Job ID required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get distributed job status
+		job, err := s.clusterManager.GetJob(jobID)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Job not found: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"job":       job,
+			"message":   "Distributed job retrieved successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Distributed job retrieved", map[string]interface{}{
+			"component": "server",
+			"job_id":    jobID,
+			"status":    job.Status,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// playbookAsyncHandler handles asynchronous playbook execution
+func (s *SecAutoServer) playbookAsyncHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req types.PlaybookRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the request
+	validation := s.validator.ValidatePlaybookRequest(&req)
+	if !validation.Valid {
+		response := types.ValidationResponse{
+			Success:   false,
+			Valid:     false,
+			Errors:    validation.Errors,
+			Message:   "Validation failed",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Submit to cluster for asynchronous execution
+	var playbook interface{}
+	if req.Playbook != nil {
+		playbook = req.Playbook
+	} else if req.PlaybookName != "" {
+		// Load playbook from file
+		playbookContent, err := s.playbookManager.GetPlaybook(req.PlaybookName)
+		if err != nil {
+			response := types.PlaybookResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Playbook not found: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Parse playbook content
+		if err := json.Unmarshal(playbookContent, &playbook); err != nil {
+			response := types.PlaybookResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Invalid playbook format: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	} else {
+		http.Error(w, "No playbook or playbook_name provided", http.StatusBadRequest)
+		return
+	}
+
+	// Submit to cluster
+	jobID, err := s.clusterManager.SubmitJob(playbook, req.Context)
+	if err != nil {
+		response := types.PlaybookResponse{
+			Success:   false,
+			Message:   fmt.Sprintf("Failed to submit async playbook: %v", err),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := types.PlaybookResponse{
+		Success:   true,
+		JobID:     jobID,
+		Message:   "Playbook submitted for asynchronous execution",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Async playbook submitted", map[string]interface{}{
+		"component":     "server",
+		"job_id":        jobID,
+		"playbook_name": req.PlaybookName,
+		"has_context":   req.Context != nil,
+	})
+}
+
+// playbookUploadHandler handles playbook file uploads
+func (s *SecAutoServer) playbookUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	// Get file from form
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "File is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Get playbook name
+	name := r.FormValue("name")
+	if name == "" {
+		// Extract from filename
+		name = strings.TrimSuffix(handler.Filename, filepath.Ext(handler.Filename))
+	}
+
+	// Read file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate playbook content
+	if errors := s.playbookManager.ValidatePlaybook(content); len(errors) > 0 {
+		response := types.ValidationResponse{
+			Success:   false,
+			Valid:     false,
+			Errors:    errors,
+			Message:   "Playbook validation failed",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Save playbook file
+	if err := s.playbookManager.SavePlaybook(name, content); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to save playbook: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":       true,
+		"message":       "Playbook uploaded successfully",
+		"playbook_name": name,
+		"filename":      handler.Filename,
+		"size":          handler.Size,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Playbook uploaded", map[string]interface{}{
+		"component":     "server",
+		"playbook_name": name,
+		"filename":      handler.Filename,
+		"size":          handler.Size,
+	})
+}
+
+// playbooksHandler handles listing all playbooks
+func (s *SecAutoServer) playbooksHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get all playbooks
+	playbooks, err := s.playbookManager.ListPlaybooks()
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to list playbooks: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":    true,
+		"playbooks":  playbooks,
+		"count":      len(playbooks),
+		"message":    "Playbooks retrieved successfully",
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Playbooks listed", map[string]interface{}{
+		"component": "server",
+		"count":     len(playbooks),
+	})
+}
+
+// playbookDeleteHandler handles deleting a specific playbook
+func (s *SecAutoServer) playbookDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract playbook name from URL
+	path := strings.TrimPrefix(r.URL.Path, "/playbook/")
+	if path == "" {
+		http.Error(w, "Playbook name required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if playbook exists
+	if !s.playbookManager.PlaybookExists(path) {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Playbook not found",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get dependencies before deletion
+	dependencies := []string{}
+	if content, err := s.playbookManager.GetPlaybook(path); err == nil {
+		if deps, err := s.playbookManager.GetPlaybookDependencies(content); err == nil {
+			dependencies = deps
+		}
+	}
+
+	// Delete playbook
+	if err := s.playbookManager.DeletePlaybook(path); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to delete playbook: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := types.PlaybookDeleteResponse{
+		Success:      true,
+		Message:      "Playbook deleted successfully",
+		PlaybookName: path,
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Playbook deleted", map[string]interface{}{
+		"component":     "server",
+		"playbook_name": path,
+		"dependencies":  dependencies,
+	})
+}
+
+// automationUploadHandler handles uploading automation scripts
+func (s *SecAutoServer) automationUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse multipart form
+	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB limit
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Failed to parse form data",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get the file
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "No file provided",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	defer file.Close()
+
+	// Validate file type
+	if !strings.HasSuffix(handler.Filename, ".py") {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Only Python (.py) files are allowed",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Read file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Failed to read file content",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get automation name (remove .py extension)
+	name := strings.TrimSuffix(handler.Filename, ".py")
+	
+	// Override name if provided in form
+	if formName := r.FormValue("name"); formName != "" {
+		name = formName
+	}
+
+	// Save automation script
+	if err := s.automationManager.SaveAutomationScript(name, content); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to save automation: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":         true,
+		"message":         "Automation uploaded successfully",
+		"filename":        handler.Filename,
+		"automation_name": name,
+		"size":            handler.Size,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Automation uploaded", map[string]interface{}{
+		"component":       "server",
+		"automation_name": name,
+		"filename":        handler.Filename,
+		"size":            handler.Size,
+	})
+}
+
+// automationsListHandler handles listing all automation scripts
+func (s *SecAutoServer) automationsListHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get automations list
+	automations, err := s.automationManager.ListAutomations()
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to list automations: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := types.AutomationListResponse{
+		Success:     true,
+		Message:     "Automations retrieved successfully",
+		Automations: automations,
+		Count:       len(automations),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Automations listed", map[string]interface{}{
+		"component": "server",
+		"count":     len(automations),
+	})
+}
+
+// automationDeleteHandler handles deleting a specific automation script
+func (s *SecAutoServer) automationDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract automation name from URL
+	path := strings.TrimPrefix(r.URL.Path, "/automation/")
+	if path == "" {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Automation name required",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get dependencies before deletion
+	dependencies, _ := s.automationManager.GetAutomationDependencies(path)
+
+	// Delete automation script
+	if err := s.automationManager.DeleteAutomationScript(path); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to delete automation: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":         true,
+		"message":         "Automation deleted successfully",
+		"automation_name": path,
+		"dependencies":    dependencies,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Automation deleted", map[string]interface{}{
+		"component":       "server",
+		"automation_name": path,
+		"dependencies":    dependencies,
+	})
+}
+
+// automationMetadataHandler handles metadata CRUD operations
+func (s *SecAutoServer) automationMetadataHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List all metadata
+		metadata := s.automationManager.ListMetadata()
+		response := types.AutomationMetadataResponse{
+			Success:   true,
+			Message:   "Automation metadata retrieved successfully",
+			Metadata:  metadata,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Automation metadata listed", map[string]interface{}{
+			"component": "server",
+			"count":     len(metadata),
+		})
+
+	case http.MethodPost:
+		// Create new metadata
+		var metadata types.AutomationMetadata
+		if err := json.NewDecoder(r.Body).Decode(&metadata); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate metadata
+		if errors := s.automationManager.ValidateAutomationMetadata(&metadata); len(errors) > 0 {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Validation failed",
+				"errors":    errors,
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Create metadata
+		if err := s.automationManager.CreateMetadata(metadata.Name, &metadata); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to create metadata: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Automation metadata created successfully",
+			"metadata":  metadata,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Automation metadata created", map[string]interface{}{
+			"component": "server",
+			"name":      metadata.Name,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// automationMetadataItemHandler handles specific metadata operations
+func (s *SecAutoServer) automationMetadataItemHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract metadata name from URL
+	name := strings.TrimPrefix(r.URL.Path, "/automation/metadata/")
+	if name == "" {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Automation name required",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get specific metadata
+		metadata, exists := s.automationManager.GetMetadata(name)
+		if !exists {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Automation metadata not found",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Automation metadata retrieved successfully",
+			"metadata":  metadata,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPut:
+		// Update metadata
+		var metadata types.AutomationMetadata
+		if err := json.NewDecoder(r.Body).Decode(&metadata); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate metadata
+		if errors := s.automationManager.ValidateAutomationMetadata(&metadata); len(errors) > 0 {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Validation failed",
+				"errors":    errors,
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Update metadata
+		if err := s.automationManager.UpdateMetadata(name, &metadata); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to update metadata: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Automation metadata updated successfully",
+			"metadata":  metadata,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Automation metadata updated", map[string]interface{}{
+			"component": "server",
+			"name":      name,
+		})
+
+	case http.MethodDelete:
+		// Delete metadata
+		if err := s.automationManager.DeleteMetadata(name); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete metadata: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Automation metadata deleted successfully",
+			"name":      name,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Automation metadata deleted", map[string]interface{}{
+			"component": "server",
+			"name":      name,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// jobsHandler handles job listing and creation
+func (s *SecAutoServer) jobsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List jobs with optional filters
+		status := r.URL.Query().Get("status")
+		limitStr := r.URL.Query().Get("limit")
+		
+		limit := 50 // Default limit
+		if limitStr != "" {
+			if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
+				limit = parsedLimit
+			}
+		}
+
+		// Get jobs from job manager
+		jobs := s.jobManager.ListJobs(status, limit)
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Jobs retrieved successfully",
+			"jobs":      jobs,
+			"count":     len(jobs),
+			"filters": map[string]interface{}{
+				"status": status,
+				"limit":  limit,
+			},
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Jobs listed", map[string]interface{}{
+			"component": "server",
+			"count":     len(jobs),
+			"status":    status,
+			"limit":     limit,
+		})
+
+	case http.MethodPost:
+		// Create new job (submit playbook for execution)
+		var request struct {
+			Playbook interface{}            `json:"playbook"`
+			Context  map[string]interface{} `json:"context"`
+			Priority int                    `json:"priority,omitempty"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Create job through job manager
+		job, err := s.jobManager.CreateJob(request.Playbook, request.Context)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to create job: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Set priority if provided
+		if request.Priority > 0 {
+			job.Priority = request.Priority
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Job created successfully",
+			"job":       job,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Job created", map[string]interface{}{
+			"component": "server",
+			"job_id":    job.ID,
+			"status":    job.Status,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// jobsStatsHandler handles job statistics
+func (s *SecAutoServer) jobsStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Get job statistics
+	stats, err := s.jobManager.GetStats()
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to get job statistics: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":   true,
+		"message":   "Job statistics retrieved successfully",
+		"stats":     stats,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Job statistics retrieved", map[string]interface{}{
+		"component":  "server",
+		"total_jobs": stats.TotalJobs,
+		"completed":  stats.Completed,
+		"failed":     stats.Failed,
+		"running":    stats.Running,
+		"pending":    stats.Pending,
+	})
+}
+
+// jobHandler handles individual job operations
+func (s *SecAutoServer) jobHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract job ID from URL
+	jobID := strings.TrimPrefix(r.URL.Path, "/job/")
+	if jobID == "" {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Job ID required",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get specific job
+		job, err := s.jobManager.GetJob(jobID)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Job not found",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Job retrieved successfully",
+			"job":       job,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Job retrieved", map[string]interface{}{
+			"component": "server",
+			"job_id":    jobID,
+			"status":    job.Status,
+		})
+
+	case http.MethodPut:
+		// Update job (mainly for status updates)
+		var request struct {
+			Status string `json:"status"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Update job status
+		if err := s.jobManager.UpdateJobStatus(jobID, request.Status); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to update job: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Get updated job
+		job, err := s.jobManager.GetJob(jobID)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Job updated but failed to retrieve updated version",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Job updated successfully",
+			"job":       job,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Job updated", map[string]interface{}{
+			"component": "server",
+			"job_id":    jobID,
+			"status":    request.Status,
+		})
+
+	case http.MethodDelete:
+		// Delete job
+		if err := s.jobManager.DeleteJob(jobID); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete job: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Job deleted successfully",
+			"job_id":    jobID,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Job deleted", map[string]interface{}{
+			"component": "server",
+			"job_id":    jobID,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// schedulesHandler handles schedule listing and creation
+func (s *SecAutoServer) schedulesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List schedules with optional status filter
+		status := r.URL.Query().Get("status")
+		var scheduleStatus types.ScheduleStatus = types.ScheduleStatusAll
+		
+		switch status {
+		case "enabled":
+			scheduleStatus = types.ScheduleStatusEnabled
+		case "disabled":
+			scheduleStatus = types.ScheduleStatusDisabled
+		}
+
+		schedules := s.scheduleManager.ListSchedules(scheduleStatus)
+		
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Schedules retrieved successfully",
+			"schedules": schedules,
+			"count":     len(schedules),
+			"filters": map[string]interface{}{
+				"status": status,
+			},
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Schedules listed", map[string]interface{}{
+			"component": "server",
+			"count":     len(schedules),
+			"filter":    status,
+		})
+
+	case http.MethodPost:
+		// Create new schedule
+		var schedule types.JobSchedule
+		if err := json.NewDecoder(r.Body).Decode(&schedule); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate required fields
+		if schedule.Name == "" {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Schedule name is required",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if schedule.CronExpr == "" {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Cron expression is required",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if schedule.Playbook == nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Playbook is required",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Create schedule
+		if err := s.scheduleManager.CreateSchedule(&schedule); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to create schedule: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":    true,
+			"message":    "Schedule created successfully",
+			"schedule":   &schedule,
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Schedule created", map[string]interface{}{
+			"component":    "server",
+			"schedule_id":  schedule.ID,
+			"schedule_name": schedule.Name,
+			"enabled":      schedule.Enabled,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// scheduleStatsHandler handles schedule statistics
+func (s *SecAutoServer) scheduleStatsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats := s.scheduleManager.GetScheduleStats()
+	
+	response := map[string]interface{}{
+		"success":   true,
+		"message":   "Schedule statistics retrieved successfully", 
+		"stats":     stats,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Schedule statistics retrieved", map[string]interface{}{
+		"component": "server",
+		"stats":     stats,
+	})
+}
+
+// scheduleHandler handles individual schedule operations
+func (s *SecAutoServer) scheduleHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract schedule ID from URL
+	scheduleID := strings.TrimPrefix(r.URL.Path, "/schedule/")
+	if scheduleID == "" {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Schedule ID required",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get specific schedule
+		schedule, exists := s.scheduleManager.GetSchedule(scheduleID)
+		if !exists {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Schedule not found",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Schedule retrieved successfully",
+			"schedule":  schedule,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Schedule retrieved", map[string]interface{}{
+			"component":    "server",
+			"schedule_id":  scheduleID,
+			"schedule_name": schedule.Name,
+		})
+
+	case http.MethodPut:
+		// Update schedule
+		var updates types.JobSchedule
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if err := s.scheduleManager.UpdateSchedule(scheduleID, &updates); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to update schedule: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Get updated schedule
+		schedule, _ := s.scheduleManager.GetSchedule(scheduleID)
+		
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Schedule updated successfully",
+			"schedule":  schedule,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Schedule updated", map[string]interface{}{
+			"component":    "server",
+			"schedule_id":  scheduleID,
+			"schedule_name": schedule.Name,
+		})
+
+	case http.MethodDelete:
+		// Delete schedule
+		if err := s.scheduleManager.DeleteSchedule(scheduleID); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete schedule: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":    true,
+			"message":    "Schedule deleted successfully",
+			"schedule_id": scheduleID,
+			"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Schedule deleted", map[string]interface{}{
+			"component":   "server", 
+			"schedule_id": scheduleID,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// scheduleExecuteHandler handles manual schedule execution
+func (s *SecAutoServer) scheduleExecuteHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract schedule ID from URL
+	scheduleID := strings.TrimPrefix(r.URL.Path, "/schedule/execute/")
+	if scheduleID == "" {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Schedule ID required",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get schedule
+	schedule, exists := s.scheduleManager.GetSchedule(scheduleID)
+	if !exists {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Schedule not found",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Execute playbook manually
+	result, err := s.ExecutePlaybook(schedule.Playbook, schedule.Context)
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Schedule execution failed: %v", err),
+			"schedule_id": scheduleID,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"message":     "Schedule executed successfully",
+		"schedule_id": scheduleID,
+		"result":      result,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("Schedule executed manually", map[string]interface{}{
+		"component":    "server",
+		"schedule_id":  scheduleID,
+		"schedule_name": schedule.Name,
+	})
+}
+
+// apiKeysHandler handles API key listing and creation
+func (s *SecAutoServer) apiKeysHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List API keys
+		keys := s.apiKeyManager.ListAPIKeys()
+		
+		response := types.APIKeyListResponse{
+			Success:   true,
+			Message:   "API keys retrieved successfully",
+			APIKeys:   keys,
+			Count:     len(keys),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("API keys listed", map[string]interface{}{
+			"component": "server",
+			"count":     len(keys),
+		})
+
+	case http.MethodPost:
+		// Create new API key
+		var request types.APIKeyCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			response := types.APIKeyCreateResponse{
+				Success:   false,
+				Message:   "Invalid JSON format",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate request
+		if request.Name == "" {
+			response := types.APIKeyCreateResponse{
+				Success:   false,
+				Message:   "API key name is required",
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Create API key (use "api" as created_by since we don't have user context)
+		apiKey, err := s.apiKeyManager.CreateAPIKey(request.Name, request.Description, "api")
+		if err != nil {
+			response := types.APIKeyCreateResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to create API key: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := types.APIKeyCreateResponse{
+			Success:   true,
+			Message:   "API key created successfully",
+			APIKey:    apiKey,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("API key created", map[string]interface{}{
+			"component": "server",
+			"key_name":  apiKey.Name,
+			"key_prefix": apiKey.Key[:12] + "...",
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// apiKeyStatsHandler handles API key statistics
+func (s *SecAutoServer) apiKeyStatsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	stats := s.apiKeyManager.GetStats()
+	response := types.APIKeyStatsResponse{
+		Success:   true,
+		Message:   "API key statistics retrieved successfully",
+		Stats:     stats,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
+
+	s.logger.Info("API key stats retrieved", map[string]interface{}{
+		"component": "server",
+		"total":     stats.Total,
+		"active":    stats.Active,
+	})
+}
+
 // Run starts the modular server
 func (s *SecAutoServer) Run() error {
 	// Setup routes
-	http.HandleFunc("/health", s.healthHandler)
-	http.HandleFunc("/playbook", s.playbookHandler)
+	http.HandleFunc("/health", s.healthHandler)  // No auth for health check
+	http.HandleFunc("/playbook", s.authMiddleware(s.playbookHandler))
+	
+	// Enhanced playbook endpoints
+	http.HandleFunc("/playbook/async", s.authMiddleware(s.playbookAsyncHandler))
+	http.HandleFunc("/playbook/upload", s.authMiddleware(s.playbookUploadHandler))
+	http.HandleFunc("/playbook/", s.authMiddleware(s.playbookDeleteHandler))
+	http.HandleFunc("/playbooks", s.authMiddleware(s.playbooksHandler))
 	
 	// Cache endpoints
-	http.HandleFunc("/cache", s.cacheHandler)
-	http.HandleFunc("/cache/stats", s.cacheStatsHandler)
-	http.HandleFunc("/cache/clear", s.cacheClearHandler)
-	http.HandleFunc("/cache/", s.cacheKeyHandler)
+	http.HandleFunc("/cache", s.authMiddleware(s.cacheHandler))
+	http.HandleFunc("/cache/stats", s.authMiddleware(s.cacheStatsHandler))
+	http.HandleFunc("/cache/clear", s.authMiddleware(s.cacheClearHandler))
+	http.HandleFunc("/cache/", s.authMiddleware(s.cacheKeyHandler))
 	
 	// Redis list endpoints
-	http.HandleFunc("/lists/", s.listHandler)
+	http.HandleFunc("/lists/", s.authMiddleware(s.listHandler))
 	
 	// Integration management endpoints
-	http.HandleFunc("/integrations", s.integrationsHandler)
-	http.HandleFunc("/integrations/", s.integrationHandler)
-	http.HandleFunc("/integrations/upload", s.integrationUploadHandler)
+	http.HandleFunc("/integrations", s.authMiddleware(s.integrationsHandler))
+	http.HandleFunc("/integrations/", s.authMiddleware(s.integrationHandler))
+	http.HandleFunc("/integrations/upload", s.authMiddleware(s.integrationUploadHandler))
+	
+	// Cluster management endpoints
+	http.HandleFunc("/cluster", s.authMiddleware(s.clusterHandler))
+	http.HandleFunc("/cluster/jobs", s.authMiddleware(s.clusterJobsHandler))
+	http.HandleFunc("/cluster/jobs/", s.authMiddleware(s.clusterJobHandler))
+	
+	// Automation management endpoints
+	http.HandleFunc("/automation", s.authMiddleware(s.automationUploadHandler))
+	http.HandleFunc("/automations", s.authMiddleware(s.automationsListHandler))
+	http.HandleFunc("/automation/", s.authMiddleware(s.automationDeleteHandler))
+	http.HandleFunc("/automation/metadata", s.authMiddleware(s.automationMetadataHandler))
+	http.HandleFunc("/automation/metadata/", s.authMiddleware(s.automationMetadataItemHandler))
+	
+	// Job management endpoints
+	http.HandleFunc("/jobs", s.authMiddleware(s.jobsHandler))
+	http.HandleFunc("/jobs/stats", s.authMiddleware(s.jobsStatsHandler))
+	http.HandleFunc("/job/", s.authMiddleware(s.jobHandler))
+	
+	// Schedule management endpoints
+	http.HandleFunc("/schedules", s.authMiddleware(s.schedulesHandler))
+	http.HandleFunc("/schedules/stats", s.authMiddleware(s.scheduleStatsHandler))
+	http.HandleFunc("/schedule/", s.authMiddleware(s.scheduleHandler))
+	http.HandleFunc("/schedule/execute/", s.authMiddleware(s.scheduleExecuteHandler))
+	
+	// API key management endpoints
+	http.HandleFunc("/api-keys", s.authMiddleware(s.apiKeysHandler))
+	http.HandleFunc("/api-keys/stats", s.authMiddleware(s.apiKeyStatsHandler))
 	
 	// Swagger/API documentation endpoints
 	http.HandleFunc("/docs", s.swagger.ServeHTTP)
@@ -809,15 +2446,38 @@ func main() {
 	}
 
 	fmt.Println("🚀 SecAuto Modular Server Starting...")
-	fmt.Printf("📁 Modules loaded: config, logger, validator, rules, cache, types, swagger\n")
+	fmt.Printf("📁 Modules loaded: config, logger, validator, rules, cache, types, swagger, integrations, cluster\n")
 	fmt.Printf("🌐 Server will start on %s:%d\n", server.config.Server.Host, server.config.Server.Port)
 	fmt.Printf("🏥 Health endpoint: http://%s:%d/health\n", server.config.Server.Host, server.config.Server.Port)
 	fmt.Printf("📋 Playbook execution endpoint: http://%s:%d/playbook\n", server.config.Server.Host, server.config.Server.Port)
 	fmt.Printf("📚 API Documentation: http://%s:%d/docs\n", server.config.Server.Host, server.config.Server.Port)
 	fmt.Printf("🔧 Cache & List endpoints available\n")
+	fmt.Printf("🔗 Integration management endpoints available\n")
+	fmt.Printf("🌐 Cluster management endpoints available\n")
+	fmt.Printf("⏰ Schedule management endpoints available\n")
+	fmt.Printf("🔐 API key authentication enabled\n")
 	fmt.Printf("⚡ Rules engine active with caching enabled\n")
 
-	if err := server.Run(); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := server.Run(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal
+	<-sigChan
+	fmt.Println("\n🔄 Shutting down server gracefully...")
+	
+	// Save API keys before shutdown
+	if err := server.apiKeyManager.Shutdown(); err != nil {
+		log.Printf("Failed to save API keys: %v", err)
+	} else {
+		fmt.Println("💾 API keys saved successfully")
 	}
+
+	fmt.Println("✅ Server shut down complete")
 }

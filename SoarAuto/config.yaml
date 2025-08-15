@@ -43,6 +43,10 @@ logging:
 # Database Configuration (Redis)
 database:
   redis_url: "redis://localhost:6379/0"
+  # TTL settings in seconds (0 = no expiration)
+  cache_ttl: 3600        # 1 hour for general cache entries
+  job_ttl: 86400         # 24 hours for completed/failed jobs
+  temp_data_ttl: 300     # 5 minutes for temporary data
 
 # Cluster Configuration
 cluster:
@@ -58,6 +62,11 @@ cluster:
   heartbeat_interval: 30
   election_timeout: 300
   job_timeout: 3600
+  # Job storage TTL settings in seconds (0 = no expiration)
+  job_storage_ttl: 0       # Default: no expiration for job storage
+  running_job_ttl: 7200    # 2 hours for running jobs (timeout stuck jobs)
+  completed_job_ttl: 86400 # 24 hours for completed jobs
+  failed_job_ttl: 604800   # 7 days for failed jobs (keep for debugging)
   max_retries: 3
   retry_delay: 5
   load_balancing: "round_robin"
@@ -141,6 +150,7 @@ security:
   api_keys:
     - "secauto-api-key-2024-07-14"
     - "another-api-key-if-needed"
+  api_keys_file: "data/security/api_keys.json"
   integration_encryption_key: "your-secure-encryption-key-for-integrations"
   rate_limiting:
     enabled: true
@@ -314,6 +324,8 @@ notifications:
 
 # Integrations Configuration
 integrations:
+  configs_path: "data/integrations/configs"
+  scripts_path: "data/integrations/scripts"
   external_apis:
     max_connections: 100
     timeout: 30
