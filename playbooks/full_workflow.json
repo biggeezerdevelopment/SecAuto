@@ -1,0 +1,11 @@
+[
+  {
+    "run": "process_incident"
+  },
+  {
+    "play": "child_playbook"
+  },
+  {
+    "run": "test_script"
+  }
+]

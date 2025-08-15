@@ -25,6 +25,7 @@ import (
 	"SoarAuto/pkg/redis"
 	"SoarAuto/pkg/rules"
 	"SoarAuto/pkg/schedules"
+	"SoarAuto/pkg/security"
 	"SoarAuto/pkg/swagger"
 	"SoarAuto/pkg/types"
 	"SoarAuto/pkg/validator"
@@ -871,6 +872,21 @@ func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.
 		name = strings.TrimSuffix(handler.Filename, filepath.Ext(handler.Filename))
 	}
 
+	// Sanitize the name to prevent path traversal
+	name = security.SanitizeFilename(name)
+	
+	// Additional validation
+	if err := security.ValidateUploadName(name); err != nil {
+		response := types.IntegrationUploadResponse{
+			Success:   false,
+			Message:   fmt.Sprintf("Invalid integration name: %v", err),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Read file content
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -1187,6 +1203,24 @@ func (s *SecAutoServer) playbookUploadHandler(w http.ResponseWriter, r *http.Req
 		name = strings.TrimSuffix(handler.Filename, filepath.Ext(handler.Filename))
 	}
 
+	// Sanitize the name to prevent path traversal
+	name = security.SanitizeFilename(name)
+	
+	// Additional validation (without .json extension)
+	nameWithoutExt := strings.TrimSuffix(name, ".json")
+	if err := security.ValidateUploadName(nameWithoutExt); err != nil {
+		response := types.ValidationResponse{
+			Success:   false,
+			Valid:     false,
+			Errors:    []types.ValidationError{{Field: "name", Message: err.Error()}},
+			Message:   fmt.Sprintf("Invalid playbook name: %v", err),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
 	// Read file content
 	content, err := io.ReadAll(file)
 	if err != nil {
@@ -1404,6 +1438,21 @@ func (s *SecAutoServer) automationUploadHandler(w http.ResponseWriter, r *http.R
 	// Override name if provided in form
 	if formName := r.FormValue("name"); formName != "" {
 		name = formName
+	}
+
+	// Sanitize the name to prevent path traversal
+	name = security.SanitizeFilename(name)
+	
+	// Additional validation
+	if err := security.ValidateUploadName(name); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Invalid automation name: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
+		return
 	}
 
 	// Save automation script

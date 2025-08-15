@@ -1,0 +1,11 @@
+[
+  {
+    "run": "parent_without_extension"
+  },
+  {
+    "play": "child_playbook"
+  },
+  {
+    "run": "parent_end_without_extension"
+  }
+]

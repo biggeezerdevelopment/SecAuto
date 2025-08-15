@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"SoarAuto/pkg/security"
 	"SoarAuto/pkg/types"
 )
 
@@ -173,13 +174,32 @@ func (am *AutomationManager) analyzePythonFile(filePath string) (lineCount, func
 
 // SaveAutomationScript saves an automation script to disk
 func (am *AutomationManager) SaveAutomationScript(name string, content []byte) error {
+	// Validate the automation name for security
+	if err := security.ValidateUploadName(name); err != nil {
+		return fmt.Errorf("invalid automation name: %v", err)
+	}
+
+	// Validate file extension
+	if err := security.ValidateFileExtension(name+".py", []string{".py"}); err != nil {
+		return err
+	}
+
+	// Validate content size (10MB limit)
+	if err := security.ValidateContentSize(int64(len(content)), 10*1024*1024); err != nil {
+		return err
+	}
+
 	// Ensure directory exists
 	if err := os.MkdirAll(am.scriptsPath, 0755); err != nil {
 		return err
 	}
 
-	// Save file
-	filename := filepath.Join(am.scriptsPath, name+".py")
+	// Securely join the path
+	filename, err := security.SecureJoinPath(am.scriptsPath, name+".py")
+	if err != nil {
+		return fmt.Errorf("failed to create secure file path: %v", err)
+	}
+
 	return os.WriteFile(filename, content, 0644)
 }
 

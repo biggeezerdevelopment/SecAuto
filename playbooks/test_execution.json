@@ -1,0 +1,26 @@
+[
+  {
+    "var": "greeting",
+    "if": {
+      "condition": {
+        "==": [
+          "{{user.name}}",
+          "admin"
+        ]
+      },
+      "then": "Hello, Administrator!",
+      "else": "Hello, {{user.name}}!"
+    }
+  },
+  {
+    "run": "echo_script.py"
+  },
+  {
+    "plugin": {
+      "name": "test_plugin",
+      "params": {
+        "message": "{{greeting}}"
+      }
+    }
+  }
+]

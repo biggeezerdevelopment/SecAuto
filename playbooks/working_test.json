@@ -1,0 +1,11 @@
+[
+  {
+    "==": {
+      "left": "{{user.name}}",
+      "right": "admin"
+    }
+  },
+  {
+    "run": "echo {{user.name}}"
+  }
+]

@@ -1,0 +1,13 @@
+[
+  {
+    "run": "child_script_{{user.role}}"
+  },
+  {
+    "plugin": {
+      "name": "child_plugin",
+      "params": {
+        "message": "Child playbook executed for {{user.name}} with role {{user.role}}"
+      }
+    }
+  }
+]

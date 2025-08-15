@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"SoarAuto/pkg/security"
 	"SoarAuto/pkg/types"
 )
 
@@ -191,13 +192,32 @@ func (im *IntegrationManager) saveConfig(name string, config *types.IntegrationC
 
 // SaveIntegrationFile saves an uploaded integration Python file
 func (im *IntegrationManager) SaveIntegrationFile(name string, content []byte) error {
+	// Validate the integration name for security
+	if err := security.ValidateUploadName(name); err != nil {
+		return fmt.Errorf("invalid integration name: %v", err)
+	}
+
+	// Validate file extension
+	if err := security.ValidateFileExtension(name+".py", []string{".py"}); err != nil {
+		return err
+	}
+
+	// Validate content size (10MB limit)
+	if err := security.ValidateContentSize(int64(len(content)), 10*1024*1024); err != nil {
+		return err
+	}
+
 	// Ensure directory exists
 	if err := os.MkdirAll(im.scriptsPath, 0755); err != nil {
 		return err
 	}
 
-	// Save file
-	filename := filepath.Join(im.scriptsPath, name+".py")
+	// Securely join the path
+	filename, err := security.SecureJoinPath(im.scriptsPath, name+".py")
+	if err != nil {
+		return fmt.Errorf("failed to create secure file path: %v", err)
+	}
+
 	return os.WriteFile(filename, content, 0644)
 }
 

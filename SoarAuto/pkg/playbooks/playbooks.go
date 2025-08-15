@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"SoarAuto/pkg/security"
 	"SoarAuto/pkg/types"
 )
 
@@ -160,8 +161,24 @@ func (pm *PlaybookManager) SavePlaybook(name string, content []byte) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
-	// Ensure directory exists
-	if err := os.MkdirAll(pm.playbooksPath, 0755); err != nil {
+	// Validate the playbook name for security (without extension first)
+	nameWithoutExt := strings.TrimSuffix(name, ".json")
+	if err := security.ValidateUploadName(nameWithoutExt); err != nil {
+		return fmt.Errorf("invalid playbook name: %v", err)
+	}
+
+	// Ensure .json extension
+	if !strings.HasSuffix(name, ".json") {
+		name += ".json"
+	}
+
+	// Validate file extension
+	if err := security.ValidateFileExtension(name, []string{".json"}); err != nil {
+		return err
+	}
+
+	// Validate content size (10MB limit)
+	if err := security.ValidateContentSize(int64(len(content)), 10*1024*1024); err != nil {
 		return err
 	}
 
@@ -171,13 +188,17 @@ func (pm *PlaybookManager) SavePlaybook(name string, content []byte) error {
 		return fmt.Errorf("invalid JSON format: %v", err)
 	}
 
-	// Ensure .json extension
-	if !strings.HasSuffix(name, ".json") {
-		name += ".json"
+	// Ensure directory exists
+	if err := os.MkdirAll(pm.playbooksPath, 0755); err != nil {
+		return err
 	}
 
-	// Save file
-	filename := filepath.Join(pm.playbooksPath, name)
+	// Securely join the path
+	filename, err := security.SecureJoinPath(pm.playbooksPath, name)
+	if err != nil {
+		return fmt.Errorf("failed to create secure file path: %v", err)
+	}
+
 	return os.WriteFile(filename, content, 0644)
 }
 
