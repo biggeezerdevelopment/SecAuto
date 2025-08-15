@@ -1,0 +1,27 @@
+# SecAuto CLI Configuration Example
+
+server: http://localhost:9090
+api_key: your-api-key-here
+output: table
+no_color: false
+verbose: false
+current: default
+
+profiles:
+  default:
+    name: default
+    server: http://localhost:9090
+    api_key: dev-key-123
+    description: Development environment
+  
+  staging:
+    name: staging
+    server: https://staging.secauto.company.com
+    api_key: staging-key-456
+    description: Staging environment
+  
+  production:
+    name: production
+    server: https://secauto.company.com
+    api_key: prod-key-789
+    description: Production environment

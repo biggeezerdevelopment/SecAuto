@@ -1,0 +1,9 @@
+[
+  {
+    "var": "greeting",
+    "value": "Hello from CLI!"
+  },
+  {
+    "log": "Playbook executed via CLI: {{greeting}}"
+  }
+]

@@ -73,19 +73,6 @@ cluster:
   health_check_interval: 60
   failover_enabled: true
 
-# Scheduler Configuration
-scheduler:
-  enabled: true
-  max_concurrent_jobs: 10
-  cleanup_interval: 3600
-  retention_days: 30
-  timezone: "UTC"
-  default_timeout: 3600
-  max_schedules: 100
-  schedule_cleanup_interval: 86400
-  failed_job_retention: 7
-  successful_job_retention: 30
-
 # Plugins Configuration
 plugins:
   enabled: true
@@ -189,28 +176,6 @@ security:
     allowed_headers: ["Content-Type", "Authorization", "X-API-Key", "Accept", "Origin"]
     # Cache preflight requests for 24 hours
     max_age: 86400
-  tls:
-    enabled: false
-    cert_file: ""
-    key_file: ""
-    min_version: "1.2"
-
-# Webhooks Configuration
-webhooks:
-  enabled: true
-  timeout: 30
-  retry_count: 3
-  retry_delay: 5
-  max_webhooks: 50
-  events:
-    - "job_completed"
-    - "job_failed"
-    - "playbook_executed"
-    - "automation_uploaded"
-    - "plugin_executed"
-  default_headers:
-    Content-Type: "application/json"
-    User-Agent: "SecAuto/1.0"
 
 # Python Configuration
 python:
@@ -225,102 +190,6 @@ python:
   sandbox_mode: true
   hot_reload: true
   script_validation: true
-
-# Rules Engine Configuration
-rules_engine:
-  max_nesting_depth: 10
-  max_conditions_per_rule: 50
-  max_variables_per_context: 1000
-  enable_debug_mode: false
-  strict_mode: true
-  allow_custom_functions: true
-  max_execution_time: 300
-  memory_limit: 512
-  # Context caching and lazy evaluation settings
-  caching:
-    max_contexts: 1000
-    max_expressions: 5000
-    max_variables: 2000
-    context_ttl: "30m"
-    expression_ttl: "15m"
-    variable_ttl: "10m"
-    cleanup_interval: "5m"
-    enable_lazy_eval: true
-    enable_expression_cache: true
-    max_field_size: 10000
-
-# Monitoring Configuration
-monitoring:
-  enabled: true
-  metrics_interval: 60
-  health_check_interval: 30
-  performance_tracking: true
-  slow_query_threshold: 1000
-  memory_usage_tracking: true
-  cpu_usage_tracking: true
-  disk_usage_tracking: true
-  custom_metrics: true
-
-# Performance Configuration
-performance:
-  worker_pool_size: 10
-  job_queue_size: 1000
-  context_cache_size: 1000
-  plugin_cache_size: 100
-  schedule_cache_size: 100
-  webhook_queue_size: 100
-  max_concurrent_requests: 100
-  request_timeout: 30
-  enable_compression: true
-  enable_caching: true
-  cache_ttl: 300
-
-# Development Configuration
-development:
-  debug_mode: false
-  verbose_logging: false
-  hot_reload_enabled: true
-  auto_restart: false
-  profile_enabled: false
-  trace_enabled: false
-  mock_external_services: false
-  test_mode: false
-
-# Backup Configuration
-backup:
-  enabled: true
-  schedule: "0 2 * * *"
-  retention_days: 30
-  compression: true
-  encryption: true
-  encryption_key: "your-backup-encryption-key"
-  backup_location: "../backups"
-  include_logs: true
-  include_config: true
-  include_plugins: true
-  max_backup_size: 104857600
-
-# Notifications Configuration
-notifications:
-  email:
-    enabled: false
-    smtp_server: "smtp.gmail.com"
-    smtp_port: 587
-    username: ""
-    password: ""
-    from_address: "secauto@company.com"
-    to_addresses: ["admin@company.com"]
-  slack:
-    enabled: false
-    webhook_url: ""
-    channel: "#security"
-    username: "SecAuto Bot"
-  teams:
-    enabled: false
-    webhook_url: ""
-  discord:
-    enabled: false
-    webhook_url: ""
 
 # Integrations Configuration
 integrations:
@@ -340,21 +209,3 @@ integrations:
     blocked_hosts: []
     max_connections: 100
     connection_timeout: 30
-
-# Environment-specific configurations
-environments:
-  development:
-    logging:
-      level: "DEBUG"
-    development:
-      debug_mode: true
-      verbose_logging: true
-  production:
-    logging:
-      level: "WARNING"
-    security:
-      rate_limiting:
-        requests_per_minute: 50
-    development:
-      debug_mode: false
-      verbose_logging: false 
