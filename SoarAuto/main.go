@@ -158,6 +158,62 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 	return server, nil
 }
 
+// corsMiddleware handles CORS (Cross-Origin Resource Sharing) headers
+func (s *SecAutoServer) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Only apply CORS if enabled in config
+		if !s.config.Security.CORS.Enabled {
+			next(w, r)
+			return
+		}
+
+		// Get origin from request
+		origin := r.Header.Get("Origin")
+		
+		// Check if origin is allowed
+		allowedOrigin := ""
+		for _, configOrigin := range s.config.Security.CORS.AllowedOrigins {
+			if configOrigin == "*" || configOrigin == origin {
+				allowedOrigin = origin
+				if allowedOrigin == "" {
+					allowedOrigin = "*"
+				}
+				break
+			}
+		}
+		
+		// Set CORS headers
+		if allowedOrigin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		}
+		
+		// Set allowed methods
+		if len(s.config.Security.CORS.AllowedMethods) > 0 {
+			methods := strings.Join(s.config.Security.CORS.AllowedMethods, ", ")
+			w.Header().Set("Access-Control-Allow-Methods", methods)
+		}
+		
+		// Set allowed headers
+		if len(s.config.Security.CORS.AllowedHeaders) > 0 {
+			headers := strings.Join(s.config.Security.CORS.AllowedHeaders, ", ")
+			w.Header().Set("Access-Control-Allow-Headers", headers)
+		}
+		
+		// Set max age for preflight cache
+		if s.config.Security.CORS.MaxAge > 0 {
+			w.Header().Set("Access-Control-Max-Age", strconv.Itoa(s.config.Security.CORS.MaxAge))
+		}
+		
+		// Handle preflight OPTIONS request
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next(w, r)
+	}
+}
+
 // authMiddleware provides API key authentication for all endpoints
 func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +257,16 @@ func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Call the next handler
 		next(w, r)
 	}
+}
+
+// middleware chains CORS and authentication middleware
+func (s *SecAutoServer) middleware(next http.HandlerFunc) http.HandlerFunc {
+	return s.corsMiddleware(s.authMiddleware(next))
+}
+
+// publicMiddleware applies only CORS middleware (for health/docs endpoints)
+func (s *SecAutoServer) publicMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return s.corsMiddleware(next)
 }
 
 // ExecutePlaybook implements the JobExecutor interface for scheduled jobs
@@ -2368,60 +2434,60 @@ func (s *SecAutoServer) apiKeyStatsHandler(w http.ResponseWriter, r *http.Reques
 // Run starts the modular server
 func (s *SecAutoServer) Run() error {
 	// Setup routes
-	http.HandleFunc("/health", s.healthHandler)  // No auth for health check
-	http.HandleFunc("/playbook", s.authMiddleware(s.playbookHandler))
+	http.HandleFunc("/health", s.publicMiddleware(s.healthHandler))  // CORS only for health check
+	http.HandleFunc("/playbook", s.middleware(s.playbookHandler))
 	
 	// Enhanced playbook endpoints
-	http.HandleFunc("/playbook/async", s.authMiddleware(s.playbookAsyncHandler))
-	http.HandleFunc("/playbook/upload", s.authMiddleware(s.playbookUploadHandler))
-	http.HandleFunc("/playbook/", s.authMiddleware(s.playbookDeleteHandler))
-	http.HandleFunc("/playbooks", s.authMiddleware(s.playbooksHandler))
+	http.HandleFunc("/playbook/async", s.middleware(s.playbookAsyncHandler))
+	http.HandleFunc("/playbook/upload", s.middleware(s.playbookUploadHandler))
+	http.HandleFunc("/playbook/", s.middleware(s.playbookDeleteHandler))
+	http.HandleFunc("/playbooks", s.middleware(s.playbooksHandler))
 	
 	// Cache endpoints
-	http.HandleFunc("/cache", s.authMiddleware(s.cacheHandler))
-	http.HandleFunc("/cache/stats", s.authMiddleware(s.cacheStatsHandler))
-	http.HandleFunc("/cache/clear", s.authMiddleware(s.cacheClearHandler))
-	http.HandleFunc("/cache/", s.authMiddleware(s.cacheKeyHandler))
+	http.HandleFunc("/cache", s.middleware(s.cacheHandler))
+	http.HandleFunc("/cache/stats", s.middleware(s.cacheStatsHandler))
+	http.HandleFunc("/cache/clear", s.middleware(s.cacheClearHandler))
+	http.HandleFunc("/cache/", s.middleware(s.cacheKeyHandler))
 	
 	// Redis list endpoints
-	http.HandleFunc("/lists/", s.authMiddleware(s.listHandler))
+	http.HandleFunc("/lists/", s.middleware(s.listHandler))
 	
 	// Integration management endpoints
-	http.HandleFunc("/integrations", s.authMiddleware(s.integrationsHandler))
-	http.HandleFunc("/integrations/", s.authMiddleware(s.integrationHandler))
-	http.HandleFunc("/integrations/upload", s.authMiddleware(s.integrationUploadHandler))
+	http.HandleFunc("/integrations", s.middleware(s.integrationsHandler))
+	http.HandleFunc("/integrations/", s.middleware(s.integrationHandler))
+	http.HandleFunc("/integrations/upload", s.middleware(s.integrationUploadHandler))
 	
 	// Cluster management endpoints
-	http.HandleFunc("/cluster", s.authMiddleware(s.clusterHandler))
-	http.HandleFunc("/cluster/jobs", s.authMiddleware(s.clusterJobsHandler))
-	http.HandleFunc("/cluster/jobs/", s.authMiddleware(s.clusterJobHandler))
+	http.HandleFunc("/cluster", s.middleware(s.clusterHandler))
+	http.HandleFunc("/cluster/jobs", s.middleware(s.clusterJobsHandler))
+	http.HandleFunc("/cluster/jobs/", s.middleware(s.clusterJobHandler))
 	
 	// Automation management endpoints
-	http.HandleFunc("/automation", s.authMiddleware(s.automationUploadHandler))
-	http.HandleFunc("/automations", s.authMiddleware(s.automationsListHandler))
-	http.HandleFunc("/automation/", s.authMiddleware(s.automationDeleteHandler))
-	http.HandleFunc("/automation/metadata", s.authMiddleware(s.automationMetadataHandler))
-	http.HandleFunc("/automation/metadata/", s.authMiddleware(s.automationMetadataItemHandler))
+	http.HandleFunc("/automation", s.middleware(s.automationUploadHandler))
+	http.HandleFunc("/automations", s.middleware(s.automationsListHandler))
+	http.HandleFunc("/automation/", s.middleware(s.automationDeleteHandler))
+	http.HandleFunc("/automation/metadata", s.middleware(s.automationMetadataHandler))
+	http.HandleFunc("/automation/metadata/", s.middleware(s.automationMetadataItemHandler))
 	
 	// Job management endpoints
-	http.HandleFunc("/jobs", s.authMiddleware(s.jobsHandler))
-	http.HandleFunc("/jobs/stats", s.authMiddleware(s.jobsStatsHandler))
-	http.HandleFunc("/job/", s.authMiddleware(s.jobHandler))
+	http.HandleFunc("/jobs", s.middleware(s.jobsHandler))
+	http.HandleFunc("/jobs/stats", s.middleware(s.jobsStatsHandler))
+	http.HandleFunc("/job/", s.middleware(s.jobHandler))
 	
 	// Schedule management endpoints
-	http.HandleFunc("/schedules", s.authMiddleware(s.schedulesHandler))
-	http.HandleFunc("/schedules/stats", s.authMiddleware(s.scheduleStatsHandler))
-	http.HandleFunc("/schedule/", s.authMiddleware(s.scheduleHandler))
-	http.HandleFunc("/schedule/execute/", s.authMiddleware(s.scheduleExecuteHandler))
+	http.HandleFunc("/schedules", s.middleware(s.schedulesHandler))
+	http.HandleFunc("/schedules/stats", s.middleware(s.scheduleStatsHandler))
+	http.HandleFunc("/schedule/", s.middleware(s.scheduleHandler))
+	http.HandleFunc("/schedule/execute/", s.middleware(s.scheduleExecuteHandler))
 	
 	// API key management endpoints
-	http.HandleFunc("/api-keys", s.authMiddleware(s.apiKeysHandler))
-	http.HandleFunc("/api-keys/stats", s.authMiddleware(s.apiKeyStatsHandler))
+	http.HandleFunc("/api-keys", s.middleware(s.apiKeysHandler))
+	http.HandleFunc("/api-keys/stats", s.middleware(s.apiKeyStatsHandler))
 	
 	// Swagger/API documentation endpoints
-	http.HandleFunc("/docs", s.swagger.ServeHTTP)
-	http.HandleFunc("/docs/", s.swagger.ServeHTTP)
-	http.HandleFunc("/api-docs", s.swagger.ServeHTTP)
+	http.HandleFunc("/docs", s.publicMiddleware(s.swagger.ServeHTTP))
+	http.HandleFunc("/docs/", s.publicMiddleware(s.swagger.ServeHTTP))
+	http.HandleFunc("/api-docs", s.publicMiddleware(s.swagger.ServeHTTP))
 
 	// Create server
 	server := &http.Server{
