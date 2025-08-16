@@ -186,7 +186,7 @@ func (rl *RateLimiter) Allow(clientID, endpoint string) error {
 	if !window.Allow(clientID, endpoint) {
 		stats := window.GetStats(clientID, endpoint)
 		
-		rl.logger.Warn("Rate limit exceeded", map[string]interface{}{
+		rl.logger.Warning("Rate limit exceeded", map[string]interface{}{
 			"component": "rate_limiter",
 			"client_id": clientID,
 			"endpoint":  endpoint,
@@ -345,7 +345,7 @@ func NewHybridRateLimiter(config *RateLimitConfig, logger types.Logger) *HybridR
 func (hrl *HybridRateLimiter) Allow(clientID, endpoint string) error {
 	// First check token bucket for burst protection
 	if !hrl.tokenBucket.Allow() {
-		hrl.logger.Warn("Token bucket limit exceeded", map[string]interface{}{
+		hrl.logger.Warning("Token bucket limit exceeded", map[string]interface{}{
 			"component": "hybrid_rate_limiter",
 			"client_id": clientID,
 			"endpoint":  endpoint,
@@ -366,7 +366,7 @@ func (hrl *HybridRateLimiter) Allow(clientID, endpoint string) error {
 	if !hrl.slidingWindow.Allow(clientID, endpoint) {
 		stats := hrl.slidingWindow.GetStats(clientID, endpoint)
 		
-		hrl.logger.Warn("Sliding window limit exceeded", map[string]interface{}{
+		hrl.logger.Warning("Sliding window limit exceeded", map[string]interface{}{
 			"component": "hybrid_rate_limiter",
 			"client_id": clientID,
 			"endpoint":  endpoint,

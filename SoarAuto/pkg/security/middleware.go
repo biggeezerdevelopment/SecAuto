@@ -159,7 +159,7 @@ func (sm *SecurityMiddleware) IPBlocking(next http.HandlerFunc) http.HandlerFunc
 		// Check if IP is blocked
 		for _, blockedIP := range sm.config.BlockedIPs {
 			if clientIP == blockedIP {
-				sm.logger.Warn("Blocked IP attempted access", map[string]interface{}{
+				sm.logger.Warning("Blocked IP attempted access", map[string]interface{}{
 					"component":   "security_middleware",
 					"blocked_ip":  clientIP,
 					"user_agent":  r.UserAgent(),
@@ -184,7 +184,7 @@ func (sm *SecurityMiddleware) UserAgentBlocking(next http.HandlerFunc) http.Hand
 		// Check if user agent contains blocked patterns
 		for _, blockedUA := range sm.config.BlockedUserAgents {
 			if strings.Contains(userAgent, strings.ToLower(blockedUA)) {
-				sm.logger.Warn("Blocked user agent attempted access", map[string]interface{}{
+				sm.logger.Warning("Blocked user agent attempted access", map[string]interface{}{
 					"component":   "security_middleware",
 					"user_agent":  r.UserAgent(),
 					"remote_addr": r.RemoteAddr,
@@ -246,7 +246,7 @@ func (sm *SecurityMiddleware) InputValidationMiddleware(next http.HandlerFunc) h
 		for key, values := range r.URL.Query() {
 			for _, value := range values {
 				if err := sm.validator.ValidateInput(value, fmt.Sprintf("query_%s", key)); err != nil {
-					sm.logger.Warn("Invalid query parameter detected", map[string]interface{}{
+					sm.logger.Warning("Invalid query parameter detected", map[string]interface{}{
 						"component":   "security_middleware",
 						"parameter":   key,
 						"remote_addr": r.RemoteAddr,
@@ -264,7 +264,7 @@ func (sm *SecurityMiddleware) InputValidationMiddleware(next http.HandlerFunc) h
 		for _, header := range suspiciousHeaders {
 			if value := r.Header.Get(header); value != "" {
 				if err := sm.validator.ValidateInput(value, fmt.Sprintf("header_%s", header)); err != nil {
-					sm.logger.Warn("Invalid header detected", map[string]interface{}{
+					sm.logger.Warning("Invalid header detected", map[string]interface{}{
 						"component":   "security_middleware",
 						"header":      header,
 						"remote_addr": r.RemoteAddr,
@@ -345,6 +345,11 @@ func (sm *SecurityMiddleware) writeErrorResponse(w http.ResponseWriter, err erro
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
 	}
+}
+
+// ValidateAPIKey validates an API key format
+func (sm *SecurityMiddleware) ValidateAPIKey(apiKey string) error {
+	return sm.validator.ValidateAPIKey(apiKey)
 }
 
 // CombinedSecurityMiddleware combines all security middleware

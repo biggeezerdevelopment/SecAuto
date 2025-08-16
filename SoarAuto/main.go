@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	"SoarAuto/pkg/clients"
 	"SoarAuto/pkg/cluster"
 	"SoarAuto/pkg/config"
+	"SoarAuto/pkg/errors"
 	"SoarAuto/pkg/integrations"
 	"SoarAuto/pkg/jobs"
 	"SoarAuto/pkg/logger"
@@ -294,7 +294,7 @@ func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// Validate API key format
-		if err := s.securityMiddleware.validator.ValidateAPIKey(apiKey); err != nil {
+		if err := s.securityMiddleware.ValidateAPIKey(apiKey); err != nil {
 			// Log authentication failure
 			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
 			
@@ -305,8 +305,9 @@ func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if !s.apiKeyManager.IsValidKey(apiKey) {
-			err := errors.AuthError(errors.ErrCodeAuthInvalid, "Invalid API key").
-				WithContext("api_key_prefix", apiKey[:8])
+			err := errors.NewErrorBuilder(errors.ErrCodeAuthInvalid, "Invalid API key").
+				WithContext("api_key_prefix", apiKey[:8]).
+				Build()
 			
 			// Log authentication failure
 			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)

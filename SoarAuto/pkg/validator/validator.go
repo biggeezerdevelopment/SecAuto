@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"SoarAuto/pkg/types"
 )
 
 // Validator provides input validation and sanitization
@@ -136,6 +138,75 @@ func (v *Validator) ValidateContext(context map[string]interface{}) error {
 	
 	// Check nesting depth and key count
 	return v.validateStructure(context, 0)
+}
+
+// ValidatePlaybookRequest validates a playbook request
+func (v *Validator) ValidatePlaybookRequest(req *types.PlaybookRequest) *types.ValidationResult {
+	result := &types.ValidationResult{
+		Valid:  true,
+		Errors: []types.ValidationError{},
+	}
+
+	// Validate that either playbook or playbook_name is provided
+	if req.Playbook == nil && req.PlaybookName == "" {
+		result.Valid = false
+		result.Errors = append(result.Errors, types.ValidationError{
+			Field:   "playbook",
+			Message: "Either playbook or playbook_name must be provided",
+		})
+		return result
+	}
+
+	// If playbook is provided, validate its structure
+	if req.Playbook != nil {
+		// Convert to map if possible
+		if playbookMap, ok := req.Playbook.(map[string]interface{}); ok {
+			if err := v.ValidatePlaybook(playbookMap); err != nil {
+				result.Valid = false
+				result.Errors = append(result.Errors, types.ValidationError{
+					Field:   "playbook",
+					Message: err.Error(),
+					Value:   req.Playbook,
+				})
+			}
+		} else if playbookArray, ok := req.Playbook.([]interface{}); ok {
+			// Validate array format
+			if len(playbookArray) == 0 {
+				result.Valid = false
+				result.Errors = append(result.Errors, types.ValidationError{
+					Field:   "playbook",
+					Message: "Playbook array cannot be empty",
+					Value:   req.Playbook,
+				})
+			}
+		}
+	}
+
+	// If playbook_name is provided, validate it
+	if req.PlaybookName != "" {
+		if err := v.ValidateScriptName(req.PlaybookName); err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, types.ValidationError{
+				Field:   "playbook_name",
+				Message: err.Error(),
+				Value:   req.PlaybookName,
+			})
+		}
+	}
+
+	// Validate context if provided
+	if req.Context != nil {
+		if err := v.ValidateContext(req.Context); err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, types.ValidationError{
+				Field:   "context",
+				Message: err.Error(),
+				Value:   req.Context,
+			})
+		}
+	}
+
+	return result
 }
 
 // validateStructure validates the structure of nested data

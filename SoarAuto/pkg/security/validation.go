@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
-
-	"SoarAuto/pkg/errors"
 )
 
 type SecurityValidator struct {
