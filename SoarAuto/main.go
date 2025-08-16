@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"SoarAuto/pkg/schedules"
 	"SoarAuto/pkg/security"
 	"SoarAuto/pkg/swagger"
+	tlsManager "SoarAuto/pkg/tls"
 	"SoarAuto/pkg/types"
 	"SoarAuto/pkg/validator"
 )
@@ -49,6 +51,7 @@ type SecAutoServer struct {
 	playbookManager          *playbooks.PlaybookManager
 	apiKeyManager            *auth.APIKeyManager
 	clientManager            *clients.ClientManager
+	tlsManager               *tlsManager.TLSManager
 }
 
 // NewSecAutoServer creates a new server instance
@@ -167,6 +170,21 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		cfg.Security.APIKeys,
 	)
 	server.apiKeyManager = apiKeyManager
+
+	// Create TLS manager if TLS is enabled
+	if cfg.Security.TLS.Enabled {
+		tlsMgr := tlsManager.NewTLSManager(&cfg.Security.TLS, lgr)
+		server.tlsManager = tlsMgr
+		
+		// Validate certificates
+		if err := tlsMgr.ValidateCertificates(); err != nil {
+			lgr.Error("TLS certificate validation failed", map[string]interface{}{
+				"component": "server",
+				"error":     err.Error(),
+			})
+			return nil, fmt.Errorf("TLS certificate validation failed: %v", err)
+		}
+	}
 
 	return server, nil
 }
@@ -2864,20 +2882,125 @@ func (s *SecAutoServer) Run() error {
 	http.HandleFunc("/docs/", s.publicMiddleware(s.swagger.ServeHTTP))
 	http.HandleFunc("/api-docs", s.publicMiddleware(s.swagger.ServeHTTP))
 
-	// Create server
+	// Start servers based on TLS configuration
+	if s.config.Security.TLS.Enabled {
+		return s.startHTTPSServer()
+	} else {
+		return s.startHTTPServer()
+	}
+}
+
+// startHTTPServer starts the HTTP server
+func (s *SecAutoServer) startHTTPServer() error {
 	server := &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port),
-		Handler: nil,
+		Addr:         fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port),
+		Handler:      nil,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
-	s.logger.Info("Starting modular SecAuto server", map[string]interface{}{
+	s.logger.Info("Starting HTTP server", map[string]interface{}{
 		"component": "server",
 		"host":      s.config.Server.Host,
 		"port":      s.config.Server.Port,
 		"version":   "modular-1.0.0",
+		"tls":       false,
 	})
 
 	return server.ListenAndServe()
+}
+
+// startHTTPSServer starts the HTTPS server and optionally HTTP redirect server
+func (s *SecAutoServer) startHTTPSServer() error {
+	// Get TLS configuration
+	tlsConfig, err := s.tlsManager.GetTLSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get TLS config: %v", err)
+	}
+
+	// Create HTTPS server
+	httpsServer := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Security.TLS.Port),
+		Handler:      nil,
+		TLSConfig:    tlsConfig,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start HTTP redirect server if auto-redirect is enabled
+	if s.config.Security.TLS.AutoRedirect {
+		go s.startHTTPRedirectServer()
+	}
+
+	// Start autocert HTTP handler if using autocert
+	if s.config.Security.TLS.AutoCert.Enabled {
+		go s.startAutocertHTTPServer()
+	}
+
+	s.logger.Info("Starting HTTPS server", map[string]interface{}{
+		"component":     "server",
+		"host":          s.config.Server.Host,
+		"https_port":    s.config.Security.TLS.Port,
+		"version":       "modular-1.0.0",
+		"tls":           true,
+		"auto_redirect": s.config.Security.TLS.AutoRedirect,
+		"autocert":      s.config.Security.TLS.AutoCert.Enabled,
+	})
+
+	// Start HTTPS server
+	if s.config.Security.TLS.AutoCert.Enabled {
+		return httpsServer.ListenAndServeTLS("", "")
+	} else {
+		return httpsServer.ListenAndServeTLS(s.config.Security.TLS.CertFile, s.config.Security.TLS.KeyFile)
+	}
+}
+
+// startHTTPRedirectServer starts a server that redirects HTTP to HTTPS
+func (s *SecAutoServer) startHTTPRedirectServer() {
+	redirectServer := &http.Server{
+		Addr:    fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port),
+		Handler: http.HandlerFunc(s.tlsManager.GetHTTPSRedirectHandler()),
+	}
+
+	s.logger.Info("Starting HTTP redirect server", map[string]interface{}{
+		"component":  "server",
+		"http_port":  s.config.Server.Port,
+		"https_port": s.config.Security.TLS.Port,
+	})
+
+	if err := redirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.logger.Error("HTTP redirect server failed", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
+	}
+}
+
+// startAutocertHTTPServer starts the HTTP server for ACME challenges
+func (s *SecAutoServer) startAutocertHTTPServer() {
+	autocertHandler := s.tlsManager.GetAutocertHandler()
+	if autocertHandler == nil {
+		return
+	}
+
+	autocertServer := &http.Server{
+		Addr:    fmt.Sprintf("%s:80", s.config.Server.Host),
+		Handler: autocertHandler,
+	}
+
+	s.logger.Info("Starting autocert HTTP server", map[string]interface{}{
+		"component": "server",
+		"port":      80,
+	})
+
+	if err := autocertServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.logger.Error("Autocert HTTP server failed", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
+	}
 }
 
 func main() {
@@ -2888,10 +3011,30 @@ func main() {
 
 	fmt.Println("🚀 SecAuto Modular Server Starting...")
 	fmt.Printf("📁 Modules loaded: config, logger, validator, rules, cache, types, swagger, integrations, cluster\n")
-	fmt.Printf("🌐 Server will start on %s:%d\n", server.config.Server.Host, server.config.Server.Port)
-	fmt.Printf("🏥 Health endpoint: http://%s:%d/health\n", server.config.Server.Host, server.config.Server.Port)
-	fmt.Printf("📋 Playbook execution endpoint: http://%s:%d/playbook\n", server.config.Server.Host, server.config.Server.Port)
-	fmt.Printf("📚 API Documentation: http://%s:%d/docs\n", server.config.Server.Host, server.config.Server.Port)
+	
+	// Display server information based on TLS configuration
+	if server.config.Security.TLS.Enabled {
+		fmt.Printf("🔒 HTTPS Server will start on %s:%d\n", server.config.Server.Host, server.config.Security.TLS.Port)
+		fmt.Printf("🏥 Health endpoint: https://%s:%d/health\n", server.config.Server.Host, server.config.Security.TLS.Port)
+		fmt.Printf("📋 Playbook execution endpoint: https://%s:%d/playbook\n", server.config.Server.Host, server.config.Security.TLS.Port)
+		fmt.Printf("📚 API Documentation: https://%s:%d/docs\n", server.config.Server.Host, server.config.Security.TLS.Port)
+		
+		if server.config.Security.TLS.AutoRedirect {
+			fmt.Printf("🔄 HTTP redirect server on %s:%d (redirects to HTTPS)\n", server.config.Server.Host, server.config.Server.Port)
+		}
+		
+		if server.config.Security.TLS.AutoCert.Enabled {
+			fmt.Printf("🤖 Automatic certificates enabled for domains: %v\n", server.config.Security.TLS.AutoCert.Domains)
+		} else {
+			fmt.Printf("📜 Using certificate: %s\n", server.config.Security.TLS.CertFile)
+		}
+	} else {
+		fmt.Printf("🌐 HTTP Server will start on %s:%d\n", server.config.Server.Host, server.config.Server.Port)
+		fmt.Printf("🏥 Health endpoint: http://%s:%d/health\n", server.config.Server.Host, server.config.Server.Port)
+		fmt.Printf("📋 Playbook execution endpoint: http://%s:%d/playbook\n", server.config.Server.Host, server.config.Server.Port)
+		fmt.Printf("📚 API Documentation: http://%s:%d/docs\n", server.config.Server.Host, server.config.Server.Port)
+	}
+	
 	fmt.Printf("🔧 Cache & List endpoints available\n")
 	fmt.Printf("🔗 Integration management endpoints available\n")
 	fmt.Printf("🌐 Cluster management endpoints available\n")

@@ -28,6 +28,7 @@
 - **🔍 Validation System**: Input validation and playbook verification
 - **📚 API Documentation**: Interactive Swagger UI documentation
 - **🌍 CORS Support**: Full cross-origin resource sharing support
+- **🔒 HTTPS Support**: TLS/SSL encryption with automatic certificates
 
 ## 🏗️ Architecture
 
@@ -234,6 +235,24 @@ curl -X GET http://localhost:8000/job/job-123 \
   -H "X-API-Key: secauto-api-key-2024-07-14"
 ```
 
+### 4. HTTPS Setup (Development)
+```bash
+# Generate self-signed certificates
+cd SoarAuto
+./scripts/generate-certs.sh
+
+# Enable HTTPS in config.yaml
+# security:
+#   tls:
+#     enabled: true
+#     cert_file: "certs/server.crt"
+#     key_file: "certs/server.key"
+
+# Test HTTPS endpoint
+curl -k https://localhost:9443/health \
+  -H "X-API-Key: secauto-api-key-2024-07-14"
+```
+
 ## 🏢 Multi-Tenant Client Support
 
 SecAuto supports multi-tenant operations with client-aware playbook execution, allowing secure isolation and client-specific configurations for automations and integrations.
@@ -384,6 +403,7 @@ SecAuto includes several example integrations that demonstrate client-aware func
 
 ### Comprehensive Guides
 - **[Cache API Documentation](SoarAuto/READMES/CACHE_API_README.md)** - Complete Redis cache API guide
+- **[HTTPS Setup Guide](SoarAuto/READMES/HTTPS_SETUP_README.md)** - TLS/SSL configuration and certificates
 - **[Plugin Development](SoarAuto/READMES/PLUGIN_SYSTEM_DEVELOPEMENT_README.md)** - Building custom plugins
 - **[Integration Development](SoarAuto/READMES/CONFIG_FILE_INTEGRATION.md)** - Creating integrations
 - **[Distributed System](SoarAuto/READMES/DISTRIBUTED_SYSTEM_README.md)** - Multi-node deployment
@@ -479,9 +499,11 @@ class MyServiceIntegration:
 ## 🔒 Security
 
 - **API Key Authentication**: Required for all endpoints
+- **HTTPS/TLS Support**: SSL/TLS encryption with automatic certificates
 - **Rate Limiting**: Configurable per-endpoint rate limits
 - **Input Validation**: Comprehensive request validation
 - **CORS Protection**: Configurable cross-origin policies
+- **Client Certificate Auth**: Mutual TLS authentication support
 - **Secure Headers**: Security-focused HTTP headers
 
 ## 📊 Monitoring

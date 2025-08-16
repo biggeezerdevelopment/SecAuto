@@ -221,10 +221,31 @@ type CORSConfig struct {
 
 // TLSConfig holds TLS settings
 type TLSConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	CertFile   string `yaml:"cert_file"`
-	KeyFile    string `yaml:"key_file"`
-	MinVersion string `yaml:"min_version"`
+	Enabled      bool         `yaml:"enabled"`
+	Port         int          `yaml:"port"`
+	CertFile     string       `yaml:"cert_file"`
+	KeyFile      string       `yaml:"key_file"`
+	AutoRedirect bool         `yaml:"auto_redirect"`
+	MinVersion   string       `yaml:"min_version"`
+	MaxVersion   string       `yaml:"max_version"`
+	CipherSuites []string     `yaml:"cipher_suites"`
+	AutoCert     AutoCertConfig `yaml:"auto_cert"`
+	ClientAuth   ClientAuthConfig `yaml:"client_auth"`
+}
+
+// AutoCertConfig holds automatic certificate management settings
+type AutoCertConfig struct {
+	Enabled  bool     `yaml:"enabled"`
+	Domains  []string `yaml:"domains"`
+	CacheDir string   `yaml:"cache_dir"`
+	Email    string   `yaml:"email"`
+}
+
+// ClientAuthConfig holds client certificate authentication settings
+type ClientAuthConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	CAFile      string `yaml:"ca_file"`
+	RequireCert bool   `yaml:"require_cert"`
 }
 
 // WebhooksConfig holds webhook configuration
