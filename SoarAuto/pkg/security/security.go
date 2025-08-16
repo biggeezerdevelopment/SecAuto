@@ -121,3 +121,29 @@ func SecureJoinPath(basePath, filename string) (string, error) {
 	
 	return fullPath, nil
 }
+
+// Encryptor provides encryption/decryption functionality for client data
+type Encryptor struct {
+	// This is a simplified implementation for demo purposes
+	// In production, use proper key management and encryption libraries
+}
+
+// NewEncryptor creates a new encryptor instance
+func NewEncryptor() (*Encryptor, error) {
+	return &Encryptor{}, nil
+}
+
+// Encrypt encrypts data using the provided key ID
+func (e *Encryptor) Encrypt(data []byte, keyID string) ([]byte, error) {
+	// This is a placeholder implementation
+	// In production, implement proper encryption with key rotation
+	return data, nil
+}
+
+// Decrypt decrypts data using the provided key ID
+func (e *Encryptor) Decrypt(encryptedData []byte, keyID string) ([]byte, error) {
+	// This is a placeholder implementation
+	// In production, implement proper decryption
+	return encryptedData, nil
+}
+

@@ -151,6 +151,16 @@ func (re *Engine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error
 					playbookContext[varNameStr] = result
 				}
 			}
+			
+			// If this is a 'run' operation, merge script results into context
+			if _, isRunOperation := ruleMap["run"]; isRunOperation {
+				if resultMap, ok := result.(map[string]interface{}); ok {
+					// Merge all keys from script result into playbook context
+					for k, v := range resultMap {
+						playbookContext[k] = v
+					}
+				}
+			}
 		}
 	}
 	

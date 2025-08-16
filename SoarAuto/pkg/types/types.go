@@ -140,13 +140,18 @@ type PlatformPluginManager interface {
 
 // IntegrationConfig represents integration configuration
 type IntegrationConfig struct {
-	Name        string                 `json:"name"`
-	Type        string                 `json:"type"`
-	Enabled     bool                   `json:"enabled"`
-	Config      map[string]interface{} `json:"config"`
-	Credentials map[string]interface{} `json:"credentials,omitempty"`
-	CreatedAt   string                 `json:"created_at"`
-	UpdatedAt   string                 `json:"updated_at"`
+	Name            string                 `json:"name"`
+	Type            string                 `json:"type"`
+	Enabled         bool                   `json:"enabled"`
+	Config          map[string]interface{} `json:"config"`
+	Credentials     map[string]interface{} `json:"credentials,omitempty"`
+	ClientID        string                 `json:"client_id,omitempty"`
+	SharedWith      []string               `json:"shared_with,omitempty"`
+	AccessLevel     string                 `json:"access_level,omitempty"`
+	EncryptionKeyID string                 `json:"encryption_key_id,omitempty"`
+	InheritFrom     string                 `json:"inherit_from,omitempty"`
+	CreatedAt       string                 `json:"created_at"`
+	UpdatedAt       string                 `json:"updated_at"`
 }
 
 // AutomationInfo represents information about an automation

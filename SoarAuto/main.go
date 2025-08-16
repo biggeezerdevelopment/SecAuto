@@ -16,6 +16,7 @@ import (
 
 	"SoarAuto/pkg/auth"
 	"SoarAuto/pkg/automations"
+	"SoarAuto/pkg/clients"
 	"SoarAuto/pkg/cluster"
 	"SoarAuto/pkg/config"
 	"SoarAuto/pkg/integrations"
@@ -47,6 +48,7 @@ type SecAutoServer struct {
 	scheduleManager          *schedules.ScheduleManager
 	playbookManager          *playbooks.PlaybookManager
 	apiKeyManager            *auth.APIKeyManager
+	clientManager            *clients.ClientManager
 }
 
 // NewSecAutoServer creates a new server instance
@@ -118,6 +120,15 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		filepath.Join("data", "playbooks"),
 	)
 
+	// Create client manager
+	clientManager, err := clients.NewClientManager(
+		filepath.Join("data", "clients"),
+		lgr,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client manager: %v", err)
+	}
+
 	// Create cluster manager (will be set after server creation)
 	var clusterManager *cluster.ClusterManager
 
@@ -135,6 +146,7 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		automationManager:        automationManager,
 		clusterManager:           clusterManager,
 		playbookManager:          playbookManager,
+		clientManager:            clientManager,
 	}
 
 	// Create cluster manager now that we have the server
@@ -2480,6 +2492,316 @@ func (s *SecAutoServer) apiKeyStatsHandler(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// clientsHandler handles client listing and creation
+func (s *SecAutoServer) clientsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// List all clients
+		clients := s.clientManager.ListClients()
+		
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Clients retrieved successfully",
+			"clients":   clients,
+			"count":     len(clients),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.logger.Info("Clients listed", map[string]interface{}{
+			"component": "clients",
+			"count":     len(clients),
+		})
+
+	case http.MethodPost:
+		// Create new client
+		var request struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Validate request
+		if request.Name == "" {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Client name is required",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Create client
+		client, err := s.clientManager.CreateClient(request.Name, request.Description)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to create client: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Client created successfully",
+			"client":    client,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.clientManager.AuditLog(client.ID, "client_created", map[string]interface{}{
+			"client_name": client.Name,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// clientHandler handles individual client operations
+func (s *SecAutoServer) clientHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract client ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/clients/")
+	if path == "" {
+		http.Error(w, "Client ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Handle sub-paths like /clients/{id}/integrations
+	parts := strings.Split(path, "/")
+	clientID := parts[0]
+
+	switch r.Method {
+	case http.MethodGet:
+		if len(parts) > 1 && parts[1] == "integrations" {
+			// Handle client integrations
+			s.handleClientIntegrations(w, r, clientID, parts[2:])
+			return
+		}
+
+		// Get specific client
+		client, err := s.clientManager.GetClient(clientID)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   err.Error(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Client retrieved successfully",
+			"client":    client,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost:
+		if len(parts) > 1 && parts[1] == "integrations" {
+			// Handle client integrations
+			s.handleClientIntegrations(w, r, clientID, parts[2:])
+			return
+		}
+		
+		// No other POST operations for individual clients
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+
+	case http.MethodPut:
+		// Update client
+		var updates map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Invalid JSON format",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if err := s.clientManager.UpdateClient(clientID, updates); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to update client: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Client updated successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.clientManager.AuditLog(clientID, "client_updated", updates)
+
+	case http.MethodDelete:
+		// Delete client
+		if err := s.clientManager.DeleteClient(clientID); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete client: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Client deleted successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+		s.clientManager.AuditLog(clientID, "client_deleted", nil)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleClientIntegrations handles client-specific integration operations
+func (s *SecAutoServer) handleClientIntegrations(w http.ResponseWriter, r *http.Request, clientID string, pathParts []string) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		if len(pathParts) == 0 {
+			// List client integrations
+			configs, err := s.clientIntegrationManager.ListClientConfigs(clientID)
+			if err != nil {
+				response := map[string]interface{}{
+					"success":   false,
+					"message":   fmt.Sprintf("Failed to list client integrations: %v", err),
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			response := map[string]interface{}{
+				"success":      true,
+				"message":      "Client integrations retrieved successfully",
+				"integrations": configs,
+				"count":        len(configs),
+				"timestamp":    time.Now().UTC().Format(time.RFC3339),
+			}
+			json.NewEncoder(w).Encode(response)
+		} else {
+			// Get specific client integration
+			integrationName := pathParts[0]
+			config, exists := s.clientIntegrationManager.GetClientConfig(clientID, integrationName)
+			if !exists {
+				response := map[string]interface{}{
+					"success":   false,
+					"message":   "Integration not found",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				w.WriteHeader(http.StatusNotFound)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			response := map[string]interface{}{
+				"success":     true,
+				"message":     "Client integration retrieved successfully",
+				"integration": config,
+				"timestamp":   time.Now().UTC().Format(time.RFC3339),
+			}
+			json.NewEncoder(w).Encode(response)
+		}
+
+	case http.MethodPost:
+		if len(pathParts) == 0 {
+			// Create client integration
+			var request struct {
+				Name   string                 `json:"name"`
+				Config *types.IntegrationConfig `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				response := map[string]interface{}{
+					"success":   false,
+					"message":   "Invalid JSON format",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			if request.Name == "" || request.Config == nil {
+				response := map[string]interface{}{
+					"success":   false,
+					"message":   "Integration name and config are required",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			// Set client-specific fields
+			request.Config.ClientID = clientID
+
+			if err := s.clientIntegrationManager.CreateClientConfig(clientID, request.Name, request.Config); err != nil {
+				response := map[string]interface{}{
+					"success":   false,
+					"message":   fmt.Sprintf("Failed to create client integration: %v", err),
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+
+			response := map[string]interface{}{
+				"success":   true,
+				"message":   "Client integration created successfully",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			json.NewEncoder(w).Encode(response)
+
+			s.clientManager.AuditLog(clientID, "integration_created", map[string]interface{}{
+				"integration_name": request.Name,
+				"integration_type": request.Config.Type,
+			})
+		}
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // Run starts the modular server
 func (s *SecAutoServer) Run() error {
 	// Setup routes
@@ -2532,6 +2854,10 @@ func (s *SecAutoServer) Run() error {
 	// API key management endpoints
 	http.HandleFunc("/api-keys", s.middleware(s.apiKeysHandler))
 	http.HandleFunc("/api-keys/stats", s.middleware(s.apiKeyStatsHandler))
+	
+	// Client management endpoints
+	http.HandleFunc("/clients", s.middleware(s.clientsHandler))
+	http.HandleFunc("/clients/", s.middleware(s.clientHandler))
 	
 	// Swagger/API documentation endpoints
 	http.HandleFunc("/docs", s.publicMiddleware(s.swagger.ServeHTTP))

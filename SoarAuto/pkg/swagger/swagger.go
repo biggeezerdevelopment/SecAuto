@@ -182,6 +182,10 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 				"name":        "Authentication",
 				"description": "API key authentication and management",
 			},
+			{
+				"name":        "Clients",
+				"description": "Multi-tenant client management with isolated integrations",
+			},
 		},
 		"paths": map[string]interface{}{
 			"/health": map[string]interface{}{
@@ -1866,6 +1870,232 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						},
 						"500": map[string]interface{}{
 							"description": "Execution failed",
+						},
+					},
+				},
+			},
+			"/clients": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "List Clients",
+					"description": "Get all clients in the system",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Clients retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientListResponse",
+									},
+								},
+							},
+						},
+						"401": map[string]interface{}{
+							"description": "Unauthorized - invalid or missing API key",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Create Client",
+					"description": "Create a new client with isolated integrations",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/ClientCreateRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client created successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientCreateResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request - name required",
+						},
+						"401": map[string]interface{}{
+							"description": "Unauthorized - invalid or missing API key",
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error during client creation",
+						},
+					},
+				},
+			},
+			"/clients/{clientId}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Client",
+					"description": "Get details of a specific client",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client not found",
+						},
+					},
+				},
+				"put": map[string]interface{}{
+					"summary":     "Update Client",
+					"description": "Update client details and settings",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/ClientUpdateRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client updated successfully",
+						},
+						"404": map[string]interface{}{
+							"description": "Client not found",
+						},
+					},
+				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete Client",
+					"description": "Delete a client and all associated data",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client deleted successfully",
+						},
+						"404": map[string]interface{}{
+							"description": "Client not found",
+						},
+					},
+				},
+			},
+			"/clients/{clientId}/integrations": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "List Client Integrations",
+					"description": "Get all integrations for a specific client",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integrations retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientIntegrationListResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client not found",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Create Client Integration",
+					"description": "Create a new integration for a specific client",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/ClientIntegrationCreateRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Client integration created successfully",
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request",
+						},
+						"404": map[string]interface{}{
+							"description": "Client not found",
 						},
 					},
 				},
