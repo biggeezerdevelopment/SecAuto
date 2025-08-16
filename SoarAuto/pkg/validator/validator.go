@@ -1,11 +1,14 @@
 package validator
 
 import (
+	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"regexp"
 	"strings"
 
+	"SoarAuto/pkg/errors"
 	"SoarAuto/pkg/types"
 )
 
@@ -395,4 +398,244 @@ func (v *Validator) containsDangerousContent(content []byte) bool {
 // ContainsDangerousContent exposes the dangerous content check
 func (v *Validator) ContainsDangerousContent(content []byte) bool {
 	return v.containsDangerousContent(content)
+}
+/
+/ Validator configuration constants
+const (
+	DefaultMaxContextSize  = 1024 * 1024 // 1MB
+	DefaultMaxPlaybookSize = 1024 * 1024 // 1MB
+	DefaultMaxNestingDepth = 10
+	DefaultMaxKeys         = 100
+)
+
+// Enhanced Validator with configuration
+type ValidatorConfig struct {
+	MaxContextSize  int
+	MaxPlaybookSize int
+	MaxNestingDepth int
+	MaxKeys         int
+}
+
+// NewValidatorWithConfig creates a validator with custom configuration
+func NewValidatorWithConfig(config *ValidatorConfig) *Validator {
+	v := NewValidator()
+	v.maxContextSize = config.MaxContextSize
+	v.maxPlaybookSize = config.MaxPlaybookSize
+	v.maxNestingDepth = config.MaxNestingDepth
+	v.maxKeys = config.MaxKeys
+	return v
+}
+
+// Add configuration fields to Validator
+type EnhancedValidator struct {
+	*Validator
+	maxContextSize  int
+	maxPlaybookSize int
+	maxNestingDepth int
+	maxKeys         int
+}
+
+// validatePlaybookName validates a playbook name for security
+func (v *Validator) validatePlaybookName(name string) bool {
+	if name == "" || len(name) > 255 {
+		return false
+	}
+	
+	// Check for path traversal
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	
+	// Check for null bytes and control characters
+	for _, char := range name {
+		if char < 32 || char == 127 {
+			return false
+		}
+	}
+	
+	return true
+}
+
+// validateContext validates context data
+func (v *Validator) validateContext(context map[string]interface{}) []types.ValidationError {
+	var errors []types.ValidationError
+	
+	if context == nil {
+		return errors
+	}
+	
+	// Check for dangerous keys
+	dangerousKeys := []string{"__proto__", "constructor", "prototype"}
+	for _, key := range dangerousKeys {
+		if _, exists := context[key]; exists {
+			errors = append(errors, types.ValidationError{
+				Field:   "context",
+				Message: fmt.Sprintf("Dangerous key not allowed: %s", key),
+				Value:   key,
+			})
+		}
+	}
+	
+	// Check nesting depth
+	if v.checkNestingDepth(context, 0) > 15 {
+		errors = append(errors, types.ValidationError{
+			Field:   "context",
+			Message: "Context nesting too deep",
+		})
+	}
+	
+	// Check number of keys
+	if v.countKeys(context) > 500 {
+		errors = append(errors, types.ValidationError{
+			Field:   "context",
+			Message: "Context has too many keys",
+		})
+	}
+	
+	return errors
+}
+
+// validatePlaybook validates playbook structure
+func (v *Validator) validatePlaybook(playbook interface{}) []types.ValidationError {
+	var errors []types.ValidationError
+	
+	if playbook == nil {
+		errors = append(errors, types.ValidationError{
+			Field:   "playbook",
+			Message: "Playbook cannot be nil",
+		})
+		return errors
+	}
+	
+	// Check if it's an array
+	if playbookArray, ok := playbook.([]interface{}); ok {
+		if len(playbookArray) == 0 {
+			errors = append(errors, types.ValidationError{
+				Field:   "playbook",
+				Message: "Playbook cannot be empty",
+			})
+			return errors
+		}
+		
+		// Validate each rule
+		for i, rule := range playbookArray {
+			if ruleErrors := v.validateRule(rule, fmt.Sprintf("playbook[%d]", i)); len(ruleErrors) > 0 {
+				errors = append(errors, ruleErrors...)
+			}
+		}
+	} else {
+		// Single rule
+		if ruleErrors := v.validateRule(playbook, "playbook"); len(ruleErrors) > 0 {
+			errors = append(errors, ruleErrors...)
+		}
+	}
+	
+	return errors
+}
+
+// validateRule validates a single playbook rule
+func (v *Validator) validateRule(rule interface{}, fieldPath string) []types.ValidationError {
+	var errors []types.ValidationError
+	
+	ruleMap, ok := rule.(map[string]interface{})
+	if !ok {
+		errors = append(errors, types.ValidationError{
+			Field:   fieldPath,
+			Message: "Rule must be an object",
+			Value:   rule,
+		})
+		return errors
+	}
+	
+	// Check if rule has required fields
+	hasRun := false
+	hasIf := false
+	
+	for key := range ruleMap {
+		if key == "run" {
+			hasRun = true
+		}
+		if key == "if" {
+			hasIf = true
+		}
+	}
+	
+	if !hasRun && !hasIf {
+		errors = append(errors, types.ValidationError{
+			Field:   fieldPath,
+			Message: "Rule must have 'run' or 'if' field",
+		})
+	}
+	
+	return errors
+}
+
+// sanitizeInput sanitizes input strings
+func (v *Validator) sanitizeInput(input string) string {
+	// Remove null bytes
+	input = strings.ReplaceAll(input, "\x00", "")
+	
+	// Replace control characters with spaces
+	input = regexp.MustCompile(`[\x00-\x1f\x7f]`).ReplaceAllString(input, " ")
+	
+	// HTML escape
+	input = html.EscapeString(input)
+	
+	return input
+}
+
+// calculateJSONSize calculates the JSON size of data
+func (v *Validator) calculateJSONSize(data interface{}) int {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return 0
+	}
+	return len(jsonData)
+}
+
+// checkNestingDepth checks the nesting depth of a map
+func (v *Validator) checkNestingDepth(data interface{}, currentDepth int) int {
+	if currentDepth > 20 { // Prevent infinite recursion
+		return currentDepth
+	}
+	
+	maxDepth := currentDepth
+	
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for _, value := range v {
+			depth := v.checkNestingDepth(value, currentDepth+1)
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		}
+	case []interface{}:
+		for _, value := range v {
+			depth := v.checkNestingDepth(value, currentDepth+1)
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		}
+	}
+	
+	return maxDepth
+}
+
+// countKeys counts the total number of keys in nested maps
+func (v *Validator) countKeys(data interface{}) int {
+	count := 0
+	
+	switch v := data.(type) {
+	case map[string]interface{}:
+		count += len(v)
+		for _, value := range v {
+			count += v.countKeys(value)
+		}
+	case []interface{}:
+		for _, value := range v {
+			count += v.countKeys(value)
+		}
+	}
+	
+	return count
 }

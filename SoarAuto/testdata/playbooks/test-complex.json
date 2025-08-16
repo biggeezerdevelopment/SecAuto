@@ -1,0 +1,21 @@
+[
+  {
+    "run": "data_enrichment",
+    "context": {
+      "incident_id": "TEST-001",
+      "severity": "medium"
+    }
+  },
+  {
+    "if": {
+      "conditions": [["==", {"var": "severity"}, "high"]],
+      "true": {"run": "escalate_incident"},
+      "false": {"run": "log_incident"}
+    }
+  },
+  {
+    "run": "email_notification",
+    "subject": "Test Incident",
+    "message": "This is a test incident notification"
+  }
+]

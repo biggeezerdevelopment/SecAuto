@@ -1,12 +1,16 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
+	
+	"SoarAuto/pkg/errors"
 )
 
 // Config holds the application configuration
@@ -477,8 +481,10 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		log.Printf("[WARN] Could not parse %s: %v. Using defaults.", configPath, err)
-		return defaults, nil
+		return nil, errors.ConfigError(
+			"Failed to parse configuration file",
+			err,
+		).WithContext("config_path", configPath)
 	}
 
 	// Merge with defaults for missing fields
@@ -486,6 +492,11 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	// Override with environment variables if present
 	overrideFromEnv(&cfg)
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
 }
@@ -577,4 +588,72 @@ func (c *Config) IsAPIKeyValid(key string) bool {
 		}
 	}
 	return false
+}
+// 
+Validate validates the configuration and returns standardized errors
+func (c *Config) Validate() error {
+	// Validate server configuration
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return errors.NewErrorBuilder(errors.ErrCodeConfigValidate, "Invalid server port").
+			WithComponent("config").
+			WithSeverity(errors.SeverityHigh).
+			WithContext("port", c.Server.Port).
+			WithContext("valid_range", "1-65535").
+			Build()
+	}
+
+	// Validate Redis URL if provided
+	if c.Database.RedisURL != "" {
+		if _, err := parseRedisURL(c.Database.RedisURL); err != nil {
+			return errors.NewErrorBuilder(errors.ErrCodeConfigValidate, "Invalid Redis URL").
+				WithComponent("config").
+				WithSeverity(errors.SeverityHigh).
+				WithContext("redis_url", c.Database.RedisURL).
+				WithContext("parse_error", err.Error()).
+				Build()
+		}
+	}
+
+	// Validate TLS configuration
+	if c.Security.TLS.Enabled {
+		if !c.Security.TLS.AutoCert.Enabled {
+			if c.Security.TLS.CertFile == "" || c.Security.TLS.KeyFile == "" {
+				return errors.NewErrorBuilder(errors.ErrCodeConfigValidate, "TLS enabled but no certificates configured").
+					WithComponent("config").
+					WithSeverity(errors.SeverityHigh).
+					WithContext("tls_enabled", true).
+					WithContext("autocert_enabled", false).
+					WithContext("cert_file", c.Security.TLS.CertFile).
+					WithContext("key_file", c.Security.TLS.KeyFile).
+					Build()
+			}
+		}
+	}
+
+	// Validate API keys
+	if len(c.Security.APIKeys) == 0 {
+		return errors.NewErrorBuilder(errors.ErrCodeConfigValidate, "No API keys configured").
+			WithComponent("config").
+			WithSeverity(errors.SeverityHigh).
+			WithContext("api_keys_count", 0).
+			Build()
+	}
+
+	// Validate logging configuration
+	if c.Logging.Level == "" {
+		return errors.NewErrorBuilder(errors.ErrCodeConfigValidate, "Logging level not specified").
+			WithComponent("config").
+			WithSeverity(errors.SeverityMedium).
+			Build()
+	}
+
+	return nil
+}
+
+// Helper function to parse Redis URL (simplified version)
+func parseRedisURL(url string) (map[string]string, error) {
+	if !strings.HasPrefix(url, "redis://") {
+		return nil, fmt.Errorf("invalid Redis URL format")
+	}
+	return map[string]string{"url": url}, nil
 }

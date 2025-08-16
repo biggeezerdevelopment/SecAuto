@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 
 	"SoarAuto/pkg/config"
+	"SoarAuto/pkg/errors"
 	"SoarAuto/pkg/types"
 )
 
@@ -74,7 +75,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if tm.config.MinVersion != "" {
 		minVersion, err := tm.parseTLSVersion(tm.config.MinVersion)
 		if err != nil {
-			return nil, fmt.Errorf("invalid min TLS version: %v", err)
+			return nil, errors.TLSError(
+				errors.ErrCodeTLSValidation,
+				"Invalid minimum TLS version",
+				err,
+			).WithContext("min_version", tm.config.MinVersion)
 		}
 		tlsConfig.MinVersion = minVersion
 	}
@@ -82,7 +87,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if tm.config.MaxVersion != "" {
 		maxVersion, err := tm.parseTLSVersion(tm.config.MaxVersion)
 		if err != nil {
-			return nil, fmt.Errorf("invalid max TLS version: %v", err)
+			return nil, errors.TLSError(
+				errors.ErrCodeTLSValidation,
+				"Invalid maximum TLS version",
+				err,
+			).WithContext("max_version", tm.config.MaxVersion)
 		}
 		tlsConfig.MaxVersion = maxVersion
 	}
@@ -91,7 +100,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if len(tm.config.CipherSuites) > 0 {
 		cipherSuites, err := tm.parseCipherSuites(tm.config.CipherSuites)
 		if err != nil {
-			return nil, fmt.Errorf("invalid cipher suites: %v", err)
+			return nil, errors.TLSError(
+				errors.ErrCodeTLSValidation,
+				"Invalid cipher suites configuration",
+				err,
+			).WithContext("cipher_suites", tm.config.CipherSuites)
 		}
 		tlsConfig.CipherSuites = cipherSuites
 	}
@@ -99,7 +112,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	// Configure client authentication if enabled
 	if tm.config.ClientAuth.Enabled {
 		if err := tm.setupClientAuth(tlsConfig); err != nil {
-			return nil, fmt.Errorf("failed to setup client auth: %v", err)
+			return nil, errors.TLSError(
+				errors.ErrCodeTLSValidation,
+				"Failed to setup client authentication",
+				err,
+			)
 		}
 	}
 
@@ -111,11 +128,22 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 		// Load certificate and key files
 		cert, err := tls.LoadX509KeyPair(tm.config.CertFile, tm.config.KeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load certificate: %v", err)
+			return nil, errors.TLSError(
+				errors.ErrCodeTLSCertificate,
+				"Failed to load TLS certificate",
+				err,
+			).WithContext("cert_file", tm.config.CertFile).
+				WithContext("key_file", tm.config.KeyFile)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 	} else {
-		return nil, fmt.Errorf("no certificate configuration provided")
+		return nil, errors.TLSError(
+			errors.ErrCodeTLSCertificate,
+			"No certificate configuration provided",
+			nil,
+		).WithContext("autocert_enabled", tm.config.AutoCert.Enabled).
+			WithContext("cert_file", tm.config.CertFile).
+			WithContext("key_file", tm.config.KeyFile)
 	}
 
 	tm.logger.Info("TLS configuration created", map[string]interface{}{
