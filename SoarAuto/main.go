@@ -52,6 +52,8 @@ type SecAutoServer struct {
 	apiKeyManager            *auth.APIKeyManager
 	clientManager            *clients.ClientManager
 	tlsManager               *tlsManager.TLSManager
+	securityMiddleware       *security.SecurityMiddleware
+	auditLogger              *security.AuditLogger
 }
 
 // NewSecAutoServer creates a new server instance
@@ -186,6 +188,25 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		}
 	}
 
+	// Create security middleware
+	securityConfig := security.DefaultSecurityConfig()
+	securityConfig.EnableRateLimiting = cfg.Security.RateLimiting.Enabled
+	securityConfig.RequireHTTPS = cfg.Security.TLS.Enabled
+	securityMiddleware := security.NewSecurityMiddleware(lgr, securityConfig)
+	server.securityMiddleware = securityMiddleware
+
+	// Create audit logger
+	auditConfig := security.DefaultAuditConfig()
+	auditLogger, err := security.NewAuditLogger(lgr, auditConfig)
+	if err != nil {
+		lgr.Error("Failed to create audit logger", map[string]interface{}{
+			"component": "server",
+			"error":     err.Error(),
+		})
+		return nil, fmt.Errorf("failed to create audit logger: %v", err)
+	}
+	server.auditLogger = auditLogger
+
 	return server, nil
 }
 
@@ -245,7 +266,7 @@ func (s *SecAutoServer) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// authMiddleware provides API key authentication for all endpoints
+// authMiddleware provides API key authentication for all endpoints with enhanced security
 func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Skip authentication for health endpoint
@@ -261,29 +282,46 @@ func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if apiKey == "" {
+			err := errors.AuthError(errors.ErrCodeAuthMissing, "API key required")
+			
+			// Log authentication failure
+			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
+			
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success":   false,
-				"message":   "API key required. Provide X-API-Key header or api_key query parameter",
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-			})
+			w.WriteHeader(err.HTTPStatusCode())
+			json.NewEncoder(w).Encode(err.ToAPIResponse())
+			return
+		}
+
+		// Validate API key format
+		if err := s.securityMiddleware.validator.ValidateAPIKey(apiKey); err != nil {
+			// Log authentication failure
+			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
+			
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(err.(*errors.SecAutoError).HTTPStatusCode())
+			json.NewEncoder(w).Encode(err.(*errors.SecAutoError).ToAPIResponse())
 			return
 		}
 
 		if !s.apiKeyManager.IsValidKey(apiKey) {
+			err := errors.AuthError(errors.ErrCodeAuthInvalid, "Invalid API key").
+				WithContext("api_key_prefix", apiKey[:8])
+			
+			// Log authentication failure
+			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
+			
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success":   false,
-				"message":   "Invalid API key",
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-			})
+			w.WriteHeader(err.HTTPStatusCode())
+			json.NewEncoder(w).Encode(err.ToAPIResponse())
 			return
 		}
 
 		// Update last used timestamp
 		s.apiKeyManager.UpdateLastUsed(apiKey)
+		
+		// Log successful authentication
+		s.auditLogger.LogAuthenticationEvent(true, apiKey[:8], "", r, nil)
 
 		// Call the next handler
 		next(w, r)

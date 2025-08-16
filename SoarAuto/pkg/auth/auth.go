@@ -122,11 +122,11 @@ func (akm *APIKeyManager) CreateAPIKey(name, description, createdBy string) (*ty
 	// Generate secure random key
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
-		return nil, errors.SystemError(
+		return nil, errors.WrapErrorBuilder(
 			errors.ErrCodeSystemResource,
 			"Failed to generate API key",
 			err,
-		).WithOperation("generate_api_key")
+		).WithOperation("generate_api_key").Build()
 	}
 
 	key := "secauto-" + hex.EncodeToString(keyBytes)
@@ -150,12 +150,12 @@ func (akm *APIKeyManager) CreateAPIKey(name, description, createdBy string) (*ty
 	if err := akm.saveKeysToFile(); err != nil {
 		// Remove from memory if save fails
 		delete(akm.keys, key)
-		return nil, errors.SystemError(
+		return nil, errors.WrapErrorBuilder(
 			errors.ErrCodeSystemResource,
 			"Failed to persist API key",
 			err,
 		).WithOperation("save_api_key").
-			WithContext("key_name", name)
+			WithContext("key_name", name).Build()
 	}
 
 	return apiKey, nil
@@ -204,11 +204,11 @@ func (akm *APIKeyManager) DeactivateAPIKey(keyPrefix string) error {
 		if key[:12] == keyPrefix[:12] {
 			// Don't allow deactivating config keys
 			if apiKey.Source == "config" {
-				return errors.AuthError(
+				return errors.NewErrorBuilder(
 					errors.ErrCodeAuthPermission,
 					"Cannot deactivate configuration API key",
 				).WithContext("key_prefix", keyPrefix).
-					WithContext("key_source", "config")
+					WithContext("key_source", "config").Build()
 			}
 
 			apiKey.Active = false
@@ -216,10 +216,10 @@ func (akm *APIKeyManager) DeactivateAPIKey(keyPrefix string) error {
 		}
 	}
 
-	return errors.AuthError(
+	return errors.NewErrorBuilder(
 		errors.ErrCodeAuthInvalid,
 		"API key not found for deactivation",
-	).WithContext("key_prefix", keyPrefix)
+	).WithContext("key_prefix", keyPrefix).Build()
 }
 
 // DeleteAPIKey permanently deletes an API key
@@ -231,11 +231,11 @@ func (akm *APIKeyManager) DeleteAPIKey(keyPrefix string) error {
 		if key[:12] == keyPrefix[:12] {
 			// Don't allow deleting config keys
 			if apiKey.Source == "config" {
-				return errors.AuthError(
+				return errors.NewErrorBuilder(
 					errors.ErrCodeAuthPermission,
 					"Cannot delete configuration API key",
 				).WithContext("key_prefix", keyPrefix).
-					WithContext("key_source", "config")
+					WithContext("key_source", "config").Build()
 			}
 
 			delete(akm.keys, key)
@@ -243,10 +243,10 @@ func (akm *APIKeyManager) DeleteAPIKey(keyPrefix string) error {
 		}
 	}
 
-	return errors.AuthError(
+	return errors.NewErrorBuilder(
 		errors.ErrCodeAuthInvalid,
 		"API key not found for deletion",
-	).WithContext("key_prefix", keyPrefix)
+	).WithContext("key_prefix", keyPrefix).Build()
 
 	return fmt.Errorf("API key not found")
 }

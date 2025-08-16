@@ -5,10 +5,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -75,11 +73,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if tm.config.MinVersion != "" {
 		minVersion, err := tm.parseTLSVersion(tm.config.MinVersion)
 		if err != nil {
-			return nil, errors.TLSError(
+			return nil, errors.WrapErrorBuilder(
 				errors.ErrCodeTLSValidation,
 				"Invalid minimum TLS version",
 				err,
-			).WithContext("min_version", tm.config.MinVersion)
+			).WithContext("min_version", tm.config.MinVersion).Build()
 		}
 		tlsConfig.MinVersion = minVersion
 	}
@@ -87,11 +85,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if tm.config.MaxVersion != "" {
 		maxVersion, err := tm.parseTLSVersion(tm.config.MaxVersion)
 		if err != nil {
-			return nil, errors.TLSError(
+			return nil, errors.WrapErrorBuilder(
 				errors.ErrCodeTLSValidation,
 				"Invalid maximum TLS version",
 				err,
-			).WithContext("max_version", tm.config.MaxVersion)
+			).WithContext("max_version", tm.config.MaxVersion).Build()
 		}
 		tlsConfig.MaxVersion = maxVersion
 	}
@@ -100,11 +98,11 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 	if len(tm.config.CipherSuites) > 0 {
 		cipherSuites, err := tm.parseCipherSuites(tm.config.CipherSuites)
 		if err != nil {
-			return nil, errors.TLSError(
+			return nil, errors.WrapErrorBuilder(
 				errors.ErrCodeTLSValidation,
 				"Invalid cipher suites configuration",
 				err,
-			).WithContext("cipher_suites", tm.config.CipherSuites)
+			).WithContext("cipher_suites", tm.config.CipherSuites).Build()
 		}
 		tlsConfig.CipherSuites = cipherSuites
 	}
@@ -128,22 +126,21 @@ func (tm *TLSManager) GetTLSConfig() (*tls.Config, error) {
 		// Load certificate and key files
 		cert, err := tls.LoadX509KeyPair(tm.config.CertFile, tm.config.KeyFile)
 		if err != nil {
-			return nil, errors.TLSError(
+			return nil, errors.WrapErrorBuilder(
 				errors.ErrCodeTLSCertificate,
 				"Failed to load TLS certificate",
 				err,
 			).WithContext("cert_file", tm.config.CertFile).
-				WithContext("key_file", tm.config.KeyFile)
+				WithContext("key_file", tm.config.KeyFile).Build()
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 	} else {
-		return nil, errors.TLSError(
+		return nil, errors.NewErrorBuilder(
 			errors.ErrCodeTLSCertificate,
 			"No certificate configuration provided",
-			nil,
 		).WithContext("autocert_enabled", tm.config.AutoCert.Enabled).
 			WithContext("cert_file", tm.config.CertFile).
-			WithContext("key_file", tm.config.KeyFile)
+			WithContext("key_file", tm.config.KeyFile).Build()
 	}
 
 	tm.logger.Info("TLS configuration created", map[string]interface{}{

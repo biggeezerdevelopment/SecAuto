@@ -481,10 +481,11 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, errors.ConfigError(
+		return nil, errors.WrapErrorBuilder(
+			errors.ErrCodeConfigParse,
 			"Failed to parse configuration file",
 			err,
-		).WithContext("config_path", configPath)
+		).WithContext("config_path", configPath).Build()
 	}
 
 	// Merge with defaults for missing fields
@@ -589,8 +590,8 @@ func (c *Config) IsAPIKeyValid(key string) bool {
 	}
 	return false
 }
-// 
-Validate validates the configuration and returns standardized errors
+
+// Validate validates the configuration and returns standardized errors
 func (c *Config) Validate() error {
 	// Validate server configuration
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
