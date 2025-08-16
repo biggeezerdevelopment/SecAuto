@@ -80,7 +80,8 @@ def reload_soar_api():
         builtins.set_list_json = SoarBaseAPI.set_list_json
         builtins.delete_list = SoarBaseAPI.delete_list
         builtins.get_list_item = SoarBaseAPI.get_list_item
-       
+        builtins.get_client_context = SoarBaseAPI.get_client_context
+        builtins.get_client_integration_config = SoarBaseAPI.get_client_integration_config
 
         #_log_message(f"SoarBaseAPI reloaded at {time.strftime('%H:%M:%S')}")
         return True
@@ -132,7 +133,8 @@ try:
     builtins.set_list_json = SoarBaseAPI.set_list_json
     builtins.delete_list = SoarBaseAPI.delete_list
     builtins.get_list_item = SoarBaseAPI.get_list_item
-   
+    builtins.get_client_context = SoarBaseAPI.get_client_context
+    builtins.get_client_integration_config = SoarBaseAPI.get_client_integration_config
     
     # Force context loading in every automation script
     def _ensure_context_loaded():

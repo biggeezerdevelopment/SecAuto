@@ -272,3 +272,166 @@ func getString(m map[string]interface{}, key string) string {
 	}
 	return ""
 }
+
+// ScheduleTable creates a formatted table for schedules
+func (p *Printer) ScheduleTable(schedules []interface{}) error {
+	if len(schedules) == 0 {
+		fmt.Println("No schedules found")
+		return nil
+	}
+
+	table := tablewriter.NewWriter(p.Writer)
+	table.SetHeader([]string{"ID", "Name", "Cron", "Enabled", "Next Run", "Last Run"})
+	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
+	table.SetCenterSeparator("|")
+
+	if !p.NoColor {
+		table.SetHeaderColor(
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
+		)
+	}
+
+	for _, schedule := range schedules {
+		if scheduleMap, ok := schedule.(map[string]interface{}); ok {
+			id := fmt.Sprintf("%.8s", getString(scheduleMap, "id"))
+			name := getString(scheduleMap, "name")
+			cronExpr := getString(scheduleMap, "cron")
+			
+			enabled := getString(scheduleMap, "enabled")
+			if enabled == "true" {
+				enabled = p.FormatStatus("enabled")
+			} else {
+				enabled = p.FormatStatus("disabled")
+			}
+			
+			nextRun := getString(scheduleMap, "next_run")
+			if nextRun != "" && nextRun != "-" {
+				if nextTime, err := time.Parse(time.RFC3339, nextRun); err == nil {
+					nextRun = nextTime.Format("2006-01-02 15:04:05")
+				}
+			}
+			
+			lastRun := getString(scheduleMap, "last_run")
+			if lastRun != "" && lastRun != "-" {
+				if lastTime, err := time.Parse(time.RFC3339, lastRun); err == nil {
+					lastRun = lastTime.Format("2006-01-02 15:04:05")
+				}
+			} else {
+				lastRun = "-"
+			}
+
+			table.Append([]string{id, name, cronExpr, enabled, nextRun, lastRun})
+		}
+	}
+
+	table.Render()
+	return nil
+}
+
+// PrintScheduleDetails prints detailed information about a schedule
+func (p *Printer) PrintScheduleDetails(schedule interface{}) {
+	fmt.Fprintf(p.Writer, "\n%s\n", p.FormatHeader("Schedule Details"))
+	
+	if scheduleMap, ok := schedule.(map[string]interface{}); ok {
+		p.PrintKeyValue("ID", getString(scheduleMap, "id"))
+		p.PrintKeyValue("Name", getString(scheduleMap, "name"))
+		p.PrintKeyValue("Description", getString(scheduleMap, "description"))
+		p.PrintKeyValue("Cron Expression", getString(scheduleMap, "cron_expression"))
+		
+		enabled := getString(scheduleMap, "enabled")
+		if enabled == "true" {
+			p.PrintKeyValue("Status", p.FormatStatus("enabled"))
+		} else {
+			p.PrintKeyValue("Status", p.FormatStatus("disabled"))
+		}
+		
+		p.PrintKeyValue("Created At", getString(scheduleMap, "created_at"))
+		p.PrintKeyValue("Updated At", getString(scheduleMap, "updated_at"))
+		p.PrintKeyValue("Next Run", getString(scheduleMap, "next_run"))
+		p.PrintKeyValue("Last Run", getString(scheduleMap, "last_run"))
+		
+		// Print playbook info
+		if playbook := scheduleMap["playbook"]; playbook != nil {
+			fmt.Fprintf(p.Writer, "\n%s\n", p.FormatHeader("Playbook"))
+			playbookJSON, _ := json.MarshalIndent(playbook, "", "  ")
+			fmt.Fprintln(p.Writer, string(playbookJSON))
+		}
+		
+		// Print context if not empty
+		if context := scheduleMap["context"]; context != nil {
+			if contextMap, ok := context.(map[string]interface{}); ok && len(contextMap) > 0 {
+				fmt.Fprintf(p.Writer, "\n%s\n", p.FormatHeader("Context"))
+				contextJSON, _ := json.MarshalIndent(context, "", "  ")
+				fmt.Fprintln(p.Writer, string(contextJSON))
+			}
+		}
+	}
+}
+
+// PrintScheduleStats prints schedule statistics
+func (p *Printer) PrintScheduleStats(stats map[string]interface{}) {
+	fmt.Fprintf(p.Writer, "\n%s\n", p.FormatHeader("Schedule Statistics"))
+	
+	if total, ok := stats["total"].(float64); ok {
+		p.PrintKeyValue("Total Schedules", fmt.Sprintf("%.0f", total))
+	}
+	
+	if enabled, ok := stats["enabled"].(float64); ok {
+		p.PrintKeyValue("Enabled", fmt.Sprintf("%.0f", enabled))
+	}
+	
+	if disabled, ok := stats["disabled"].(float64); ok {
+		p.PrintKeyValue("Disabled", fmt.Sprintf("%.0f", disabled))
+	}
+	
+	if running, ok := stats["running"].(float64); ok {
+		p.PrintKeyValue("Currently Running", fmt.Sprintf("%.0f", running))
+	}
+	
+	if failed, ok := stats["failed_last_run"].(float64); ok {
+		p.PrintKeyValue("Failed Last Run", fmt.Sprintf("%.0f", failed))
+	}
+	
+	if nextScheduled, ok := stats["next_scheduled"].(string); ok && nextScheduled != "" {
+		p.PrintKeyValue("Next Scheduled", nextScheduled)
+	}
+}
+
+// FormatHeader formats a header string
+func (p *Printer) FormatHeader(header string) string {
+	if p.NoColor {
+		return fmt.Sprintf("=== %s ===", header)
+	}
+	return color.New(color.Bold, color.FgCyan).Sprintf("=== %s ===", header)
+}
+
+// PrintKeyValue prints a key-value pair
+func (p *Printer) PrintKeyValue(key, value string) {
+	if p.NoColor {
+		fmt.Fprintf(p.Writer, "%s: %s\n", key, value)
+	} else {
+		fmt.Fprintf(p.Writer, "%s: %s\n", 
+			color.New(color.Bold).Sprint(key),
+			value)
+	}
+}
+
+// PrintYAML outputs data as YAML
+func (p *Printer) PrintYAML(data interface{}) error {
+	yamlData, err := yaml.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = p.Writer.Write(yamlData)
+	return err
+}
+
+// Success prints a success message (simplified name)
+func (p *Printer) Success(message string) {
+	p.PrintSuccess(message)
+}

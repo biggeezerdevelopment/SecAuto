@@ -20,6 +20,14 @@ def base_context():
 
 def load_context():
     try:
+        # Try environment variable first (more reliable)
+        env_context = os.environ.get('SECAUTO_CONTEXT')
+        if env_context:
+            try:
+                return json.loads(env_context)
+            except json.JSONDecodeError:
+                pass
+        
         # Try to read JSON input from stdin
         input_data = None
         try:
@@ -92,7 +100,7 @@ def search_context_path(json_obj, key_path):
     return current_data
 
 
-def get_secauto_config() -> tuple[str, str]:
+def get_secauto_config():
         """
         Get SecAuto configuration from config file or environment variables
         
@@ -127,7 +135,17 @@ def get_secauto_config() -> tuple[str, str]:
         #logger.warning("No SecAuto config found, using defaults")
         return "http://localhost:8080", None
 
-def get_integration_config(integration_name: str) -> dict:         
+def get_integration_config(integration_name: str, client_id: str = None) -> dict:         
+    """
+    Get integration configuration, with optional client-specific override
+    
+    Args:
+        integration_name: Name of the integration
+        client_id: Optional client ID for client-specific config
+        
+    Returns:
+        Integration configuration dictionary or None
+    """
     # Get configuration
     secauto_url, secauto_api_key = get_secauto_config()
     
@@ -138,6 +156,24 @@ def get_integration_config(integration_name: str) -> dict:
         "X-API-Key": secauto_api_key,
         "Content-Type": "application/json"
     }
+    
+    # If client_id is provided, try client-specific config first
+    if client_id:
+        try:
+            response = requests.get(
+                f"{secauto_url}/clients/{client_id}/integrations/{integration_name}",
+                headers=headers,
+                timeout=10
+            )               
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("success") and data.get("integration"):
+                    return data["integration"]
+        except requests.exceptions.RequestException as e:
+            # Fall back to global config if client-specific fails
+            pass
+    
+    # Try global integration config
     try:
         response = requests.get(
                     f"{secauto_url}/integrations/{integration_name}",
@@ -215,7 +251,7 @@ def get_list(list_name: str) -> Dict[str, Any]:
     else:
         return None
     
-def set_list_array(list_name: str, value: str|list) -> Dict[str, Any]:
+def set_list_array(list_name: str, value) -> Dict[str, Any]:
     """Set list value"""
     headers = {
         "X-API-Key": secauto_api_key,
@@ -281,4 +317,54 @@ def get_list_item(list_name: str, item_name: str) -> Dict[str, Any]:
         return resp.json()
     else:
         return None
+
+def get_client_context() -> str:
+    """
+    Get the current client ID from the execution context
+    
+    Returns:
+        Client ID string or None if not in client context
+    """
+    # Check environment variable first (set by playbook execution)
+    import os
+    client_id = os.environ.get('SECAUTO_CLIENT_ID')
+    if client_id:
+        return client_id
+    
+    # Check global context for client information
+    try:
+        context = load_context()
+        if context and isinstance(context, dict):
+            # Look for client_id in various context locations
+            client_id = context.get('client_id')
+            if client_id:
+                return client_id
+                
+            # Check nested contexts
+            if 'metadata' in context:
+                client_id = context['metadata'].get('client_id')
+                if client_id:
+                    return client_id
+                    
+            if 'execution_context' in context:
+                client_id = context['execution_context'].get('client_id')
+                if client_id:
+                    return client_id
+    except:
+        pass
+    
+    return None
+
+def get_client_integration_config(integration_name: str) -> dict:
+    """
+    Get integration config with automatic client context detection
+    
+    Args:
+        integration_name: Name of the integration
+        
+    Returns:
+        Integration configuration dictionary or None
+    """
+    client_id = get_client_context()
+    return get_integration_config(integration_name, client_id)
     

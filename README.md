@@ -234,6 +234,152 @@ curl -X GET http://localhost:8000/job/job-123 \
   -H "X-API-Key: secauto-api-key-2024-07-14"
 ```
 
+## 🏢 Multi-Tenant Client Support
+
+SecAuto supports multi-tenant operations with client-aware playbook execution, allowing secure isolation and client-specific configurations for automations and integrations.
+
+### Client-Aware Playbook Execution
+
+There are several methods to execute playbooks with client context for proper tenant isolation and client-specific configuration loading:
+
+#### 1. Client-Specific API Endpoint (Recommended)
+```bash
+# Execute playbook for specific client
+curl -X POST http://localhost:9090/clients/{client_id}/playbook \
+  -H "X-API-Key: client-specific-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "playbook": [
+      {"run": "threat_intel_lookup", "indicators": ["8.8.8.8", "malware.exe"]},
+      {"run": "email_notification", "severity": "high"}
+    ]
+  }'
+```
+
+**Benefits:**
+- ✅ Automatic client context injection
+- ✅ Client-specific API key authentication
+- ✅ Clear tenant isolation
+- ✅ Proper audit trails
+
+#### 2. Playbook Context Parameter
+```bash
+# Pass client_id in playbook context
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: global-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "playbook": [{"run": "file_analysis", "file_path": "/tmp/suspicious.exe"}],
+    "context": {
+      "client_id": "acme_corp",
+      "incident_id": "INC-001"
+    }
+  }'
+```
+
+#### 3. Step-Level Client Context
+```bash
+# Different clients per playbook step
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "playbook": [
+      {
+        "run": "threat_intel_lookup",
+        "client_id": "customer_123",
+        "indicators": ["suspicious.com"]
+      },
+      {
+        "run": "email_notification", 
+        "client_id": "customer_456",
+        "severity": "medium"
+      }
+    ]
+  }'
+```
+
+#### 4. HTTP Header Method
+```bash
+# Pass client via custom header
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: api-key" \
+  -H "X-Client-ID: customer_abc" \
+  -H "Content-Type: application/json" \
+  -d '{"playbook": [{"run": "file_analysis"}]}'
+```
+
+### Client Management APIs
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/clients` | GET | List all clients |
+| `/clients` | POST | Create new client |
+| `/clients/{id}` | GET | Get client details |
+| `/clients/{id}` | PUT | Update client |
+| `/clients/{id}` | DELETE | Delete client |
+| `/clients/{id}/integrations` | GET | List client integrations |
+| `/clients/{id}/integrations` | POST | Create client integration |
+| `/clients/{id}/integrations/{name}` | GET | Get client integration |
+
+### Client-Aware Python Integrations
+
+Python automation scripts automatically detect client context and load client-specific configurations:
+
+```python
+#!/usr/bin/env python3
+"""
+Example client-aware integration
+"""
+
+def main():
+    # Automatically detect client context
+    client_id = get_client_context()
+    
+    # Load client-specific configuration (with global fallback)
+    config = get_client_integration_config("threat_intel")
+    
+    # Use client-specific settings
+    if config:
+        api_key = config["credentials"]["virustotal_api_key"]
+        threshold = config["config"]["malicious_threshold"]
+        
+        # Perform client-specific analysis
+        result = analyze_with_client_config(api_key, threshold)
+    
+    return_context(result)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Execution Flow
+
+1. **Request received** with client identification (URL path, context, or header)
+2. **Server extracts client_id** and validates client permissions
+3. **Isolated process created** with client-specific environment variables
+4. **Python script executes** in isolated process with client context
+5. **Client-specific config loaded** via `get_client_integration_config()`
+6. **Automation runs** with client-specific settings and credentials
+
+**Concurrency Safety:** Each automation runs in a separate process with isolated environment variables, preventing context bleeding between concurrent client requests.
+
+### Example Client-Aware Integrations
+
+SecAuto includes several example integrations that demonstrate client-aware functionality:
+
+- **`threat_intel_lookup.py`** - Client-specific threat intelligence APIs and scoring
+- **`email_notification.py`** - Client-specific SMTP settings and templates  
+- **`file_analysis.py`** - Client-specific sandbox environments and policies
+
+### Client Isolation Features
+
+- **🔐 Separate API Keys**: Each client has unique authentication credentials
+- **📁 Isolated Storage**: Client-specific directories for configs and data
+- **⚙️ Custom Settings**: Per-client thresholds, templates, and policies
+- **🔄 Fallback Support**: Automatic fallback to global configurations
+- **📊 Audit Trails**: Complete client-specific logging and tracking
+
 ## 📚 Documentation
 
 ### Comprehensive Guides

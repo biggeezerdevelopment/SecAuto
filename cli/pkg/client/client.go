@@ -469,3 +469,212 @@ func (c *Client) GetClusterStatus() (*ClusterStatus, error) {
 
 	return &status, nil
 }
+
+// Schedule represents a job schedule
+type Schedule struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	CronExpr    string                 `json:"cron_expression"`
+	Playbook    interface{}            `json:"playbook"`
+	Context     map[string]interface{} `json:"context"`
+	Enabled     bool                   `json:"enabled"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	NextRun     string                 `json:"next_run,omitempty"`
+	LastRun     string                 `json:"last_run,omitempty"`
+	Status      string                 `json:"status"`
+}
+
+// ListSchedules lists all schedules with optional status filter
+func (c *Client) ListSchedules(status string) ([]*Schedule, error) {
+	query := make(map[string]string)
+	if status != "" {
+		query["status"] = status
+	}
+
+	resp, err := c.Do(&Request{
+		Method: "GET",
+		Path:   "/schedules",
+		Query:  query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success   bool        `json:"success"`
+		Schedules []*Schedule `json:"schedules"`
+		Message   string      `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return result.Schedules, nil
+}
+
+// GetSchedule gets a specific schedule by ID
+func (c *Client) GetSchedule(scheduleID string) (*Schedule, error) {
+	resp, err := c.Do(&Request{
+		Method: "GET",
+		Path:   "/schedule/" + scheduleID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success  bool      `json:"success"`
+		Schedule *Schedule `json:"schedule"`
+		Message  string    `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return result.Schedule, nil
+}
+
+// CreateSchedule creates a new schedule
+func (c *Client) CreateSchedule(schedule *Schedule) (*Schedule, error) {
+	resp, err := c.Do(&Request{
+		Method: "POST",
+		Path:   "/schedules",
+		Body:   schedule,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success  bool      `json:"success"`
+		Schedule *Schedule `json:"schedule"`
+		Message  string    `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return result.Schedule, nil
+}
+
+// UpdateSchedule updates an existing schedule
+func (c *Client) UpdateSchedule(scheduleID string, updates *Schedule) (*Schedule, error) {
+	resp, err := c.Do(&Request{
+		Method: "PUT",
+		Path:   "/schedule/" + scheduleID,
+		Body:   updates,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success  bool      `json:"success"`
+		Schedule *Schedule `json:"schedule"`
+		Message  string    `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return result.Schedule, nil
+}
+
+// DeleteSchedule deletes a schedule
+func (c *Client) DeleteSchedule(scheduleID string) error {
+	resp, err := c.Do(&Request{
+		Method: "DELETE",
+		Path:   "/schedule/" + scheduleID,
+	})
+	if err != nil {
+		return err
+	}
+
+	var result struct {
+		Success string `json:"success"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if result.Success != "true" {
+		return fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return nil
+}
+
+// ExecuteSchedule manually executes a schedule
+func (c *Client) ExecuteSchedule(scheduleID string) (interface{}, error) {
+	resp, err := c.Do(&Request{
+		Method: "POST",
+		Path:   "/schedule/execute/" + scheduleID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if success, ok := result["success"].(bool); ok && !success {
+		if msg, ok := result["message"].(string); ok {
+			return nil, fmt.Errorf("server error: %s", msg)
+		}
+	}
+
+	return result["result"], nil
+}
+
+// GetScheduleStats gets schedule statistics
+func (c *Client) GetScheduleStats() (map[string]interface{}, error) {
+	resp, err := c.Do(&Request{
+		Method: "GET",
+		Path:   "/schedules/stats",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool                   `json:"success"`
+		Stats   map[string]interface{} `json:"stats"`
+		Message string                 `json:"message"`
+	}
+
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+	}
+
+	if !result.Success {
+		return nil, fmt.Errorf("server error: %s", result.Message)
+	}
+
+	return result.Stats, nil
+}
