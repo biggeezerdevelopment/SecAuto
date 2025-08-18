@@ -331,12 +331,13 @@ type IntegrationResponse struct {
 }
 
 type IntegrationUploadResponse struct {
-	Success         bool   `json:"success"`
-	Message         string `json:"message"`
-	IntegrationName string `json:"integration_name"`
-	Filename        string `json:"filename"`
-	Size            int64  `json:"size"`
-	Timestamp       string `json:"timestamp"`
+	Success         bool                   `json:"success"`
+	Message         string                 `json:"message"`
+	IntegrationName string                 `json:"integration_name"`
+	Filename        string                 `json:"filename"`
+	Size            int64                  `json:"size"`
+	Timestamp       string                 `json:"timestamp"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
 }
 
 type IntegrationDeleteResponse struct {

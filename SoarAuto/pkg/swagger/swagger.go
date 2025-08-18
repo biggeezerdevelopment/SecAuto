@@ -803,8 +803,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			},
 			"/integrations/upload": map[string]interface{}{
 				"post": map[string]interface{}{
-					"summary":     "Upload Integration Script",
-					"description": "Upload a Python integration script file",
+					"summary":     "Upload Integration Script or Configuration",
+					"description": "Upload a Python integration script (.py) or configuration file (.json). JSON configurations trigger automatic backend dependency building.",
 					"tags":        []string{"Integrations"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"requestBody": map[string]interface{}{
@@ -817,7 +817,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 										"file": map[string]interface{}{
 											"type":        "string",
 											"format":      "binary",
-											"description": "Python integration script (.py file)",
+											"description": "Python integration script (.py file) or configuration (.json file with dependencies)",
 										},
 										"name": map[string]interface{}{
 											"type":        "string",
@@ -845,6 +845,66 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						},
 						"500": map[string]interface{}{
 							"description": "Internal server error during upload",
+						},
+					},
+				},
+			},
+			"/integrations/build-status/{integration_name}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Integration Build Status",
+					"description": "Retrieve the build status of a specific integration backend, including dependency installation status and site-packages location",
+					"tags":        []string{"Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "integration_name",
+							"in":          "path",
+							"required":    true,
+							"description": "Name of the integration to check build status for",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Build status retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/IntegrationBuildStatusResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Integration not found or not built",
+						},
+						"500": map[string]interface{}{
+							"description": "Error retrieving build status",
+						},
+					},
+				},
+			},
+			"/integrations/build-status": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "List All Integration Build Statuses",
+					"description": "Retrieve build status for all integrations that have been built",
+					"tags":        []string{"Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Build statuses retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/IntegrationBuildStatusListResponse",
+									},
+								},
+							},
+						},
+						"500": map[string]interface{}{
+							"description": "Error retrieving build statuses",
 						},
 					},
 				},
@@ -2476,6 +2536,115 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"type":        "string",
 							"format":      "date-time",
 							"description": "Upload timestamp",
+						},
+						"metadata": map[string]interface{}{
+							"type":        "object",
+							"description": "Additional metadata including build results (for JSON configuration files)",
+							"properties": map[string]interface{}{
+								"success": map[string]interface{}{
+									"type":        "boolean",
+									"description": "Whether backend build was successful (for JSON configs)",
+								},
+								"integration": map[string]interface{}{
+									"type":        "string",
+									"description": "Integration name that was built",
+								},
+								"site_packages": map[string]interface{}{
+									"type":        "string",
+									"description": "Path to integration-specific site-packages directory",
+								},
+								"dependencies_installed": map[string]interface{}{
+									"type":        "integer",
+									"description": "Number of dependencies successfully installed",
+								},
+								"error": map[string]interface{}{
+									"type":        "string",
+									"description": "Error message if build failed",
+								},
+							},
+						},
+					},
+				},
+				"IntegrationBuildStatusResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether the status retrieval was successful",
+						},
+						"integration": map[string]interface{}{
+							"type":        "string",
+							"description": "Integration name",
+						},
+						"status": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"integration": map[string]interface{}{
+									"type":        "string",
+									"description": "Integration name",
+								},
+								"version": map[string]interface{}{
+									"type":        "string",
+									"description": "Integration version",
+								},
+								"status": map[string]interface{}{
+									"type":        "string",
+									"enum":        []string{"building", "completed", "failed"},
+									"description": "Current build status",
+								},
+								"site_packages": map[string]interface{}{
+									"type":        "string",
+									"description": "Path to integration site-packages directory",
+								},
+								"dependencies": map[string]interface{}{
+									"type": "array",
+									"items": map[string]interface{}{
+										"type": "object",
+										"properties": map[string]interface{}{
+											"package": map[string]interface{}{
+												"type":        "string",
+												"description": "Package name and version",
+											},
+											"status": map[string]interface{}{
+												"type":        "string",
+												"description": "Installation status",
+											},
+											"location": map[string]interface{}{
+												"type":        "string",
+												"description": "Installation location",
+											},
+										},
+									},
+									"description": "List of installed dependencies",
+								},
+							},
+							"description": "Build status details",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+				},
+				"IntegrationBuildStatusListResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether the status retrieval was successful",
+						},
+						"status": map[string]interface{}{
+							"type": "object",
+							"additionalProperties": map[string]interface{}{
+								"$ref": "#/components/schemas/IntegrationBuildStatusResponse/properties/status",
+							},
+							"description": "Build status for all integrations",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
 						},
 					},
 				},

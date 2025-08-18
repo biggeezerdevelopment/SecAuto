@@ -7,8 +7,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -911,7 +913,7 @@ func (s *SecAutoServer) integrationHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// integrationUploadHandler handles integration file uploads
+// integrationUploadHandler handles integration file uploads (both .py scripts and .json configs)
 func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -963,26 +965,185 @@ func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Save integration file
-	if err := s.integrationManager.SaveIntegrationFile(name, content); err != nil {
+	// Check if this is a JSON configuration file
+	isConfig := strings.HasSuffix(handler.Filename, "_config.json") || strings.HasSuffix(handler.Filename, ".json")
+	
+	if isConfig {
+		// Save configuration file and trigger build
+		configPath := filepath.Join("../integrations", name+"_config.json")
+		if err := os.WriteFile(configPath, content, 0644); err != nil {
+			response := types.IntegrationUploadResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to save integration config: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+		
+		// Trigger backend build for the integration
+		buildResult := s.triggerIntegrationBuild(configPath, name)
+		
 		response := types.IntegrationUploadResponse{
-			Success:   false,
-			Message:   fmt.Sprintf("Failed to save integration file: %v", err),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Success:         buildResult["success"].(bool),
+			Message:         "Integration configuration uploaded and build triggered",
+			IntegrationName: name,
+			Filename:        handler.Filename,
+			Size:            handler.Size,
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+			Metadata:        buildResult,
+		}
+		json.NewEncoder(w).Encode(response)
+	} else {
+		// Save integration Python file
+		if err := s.integrationManager.SaveIntegrationFile(name, content); err != nil {
+			response := types.IntegrationUploadResponse{
+				Success:   false,
+				Message:   fmt.Sprintf("Failed to save integration file: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := types.IntegrationUploadResponse{
+			Success:         true,
+			Message:         "Integration file uploaded successfully",
+			IntegrationName: name,
+			Filename:        handler.Filename,
+			Size:            handler.Size,
+			Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// triggerIntegrationBuild triggers the Python script to build integration backend
+func (s *SecAutoServer) triggerIntegrationBuild(configPath string, integrationName string) map[string]interface{} {
+	// Get Python path from config
+	pythonPath := filepath.Join(s.config.Python.VenvPath, "bin", "python")
+	if runtime.GOOS == "windows" {
+		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
+	}
+	
+	// Build command to run the integration build script
+	scriptPath := filepath.Join("..", "scripts", "integration_upload_hook.py")
+	cmd := exec.Command(pythonPath, scriptPath, configPath, "--name", integrationName)
+	
+	// Set working directory to parent of SoarAuto directory
+	workDir, _ := os.Getwd()
+	cmd.Dir = filepath.Dir(workDir)
+	
+	// Run the command and capture output
+	output, err := cmd.CombinedOutput()
+	
+	// Parse the output as JSON
+	var result map[string]interface{}
+	if err != nil {
+		s.logger.Error("Failed to trigger integration build", map[string]interface{}{
+			"integration": integrationName,
+			"error":       err.Error(),
+			"output":      string(output),
+		})
+		return map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+			"output":  string(output),
+		}
+	}
+	
+	// Try to parse JSON output
+	if err := json.Unmarshal(output, &result); err != nil {
+		// If not JSON, return raw output
+		return map[string]interface{}{
+			"success": true,
+			"message": string(output),
+		}
+	}
+	
+	s.logger.Info("Integration build triggered", map[string]interface{}{
+		"integration": integrationName,
+		"result":      result,
+	})
+	
+	return result
+}
+
+// integrationBuildStatusHandler handles requests for integration build status
+func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	
+	// Get integration name from path
+	path := strings.TrimPrefix(r.URL.Path, "/integrations/build-status/")
+	integrationName := strings.TrimSpace(path)
+	
+	// Get Python path from config
+	pythonPath := filepath.Join(s.config.Python.VenvPath, "bin", "python")
+	if runtime.GOOS == "windows" {
+		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
+	}
+	
+	// Build command to check status
+	scriptPath := filepath.Join("..", "scripts", "build_integration_backend.py")
+	var cmd *exec.Cmd
+	
+	if integrationName != "" {
+		cmd = exec.Command(pythonPath, scriptPath, "status", "--name", integrationName)
+	} else {
+		cmd = exec.Command(pythonPath, scriptPath, "status")
+	}
+	
+	// Set working directory to parent of SoarAuto directory
+	workDir, _ := os.Getwd()
+	cmd.Dir = filepath.Dir(workDir)
+	
+	// Run the command
+	output, err := cmd.CombinedOutput()
+	
+	// Parse the output as JSON
+	var status map[string]interface{}
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"error":     err.Error(),
+			"output":    string(output),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(response)
 		return
 	}
-
-	response := types.IntegrationUploadResponse{
-		Success:         true,
-		Message:         "Integration file uploaded successfully",
-		IntegrationName: name,
-		Filename:        handler.Filename,
-		Size:            handler.Size,
-		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+	
+	// Parse JSON output
+	if err := json.Unmarshal(output, &status); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"error":     "Failed to parse status",
+			"output":    string(output),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
 	}
+	
+	response := map[string]interface{}{
+		"success":   true,
+		"status":    status,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+	
+	if integrationName != "" {
+		response["integration"] = integrationName
+	}
+	
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -2884,6 +3045,7 @@ func (s *SecAutoServer) Run() error {
 	http.HandleFunc("/integrations", s.middleware(s.integrationsHandler))
 	http.HandleFunc("/integrations/", s.middleware(s.integrationHandler))
 	http.HandleFunc("/integrations/upload", s.middleware(s.integrationUploadHandler))
+	http.HandleFunc("/integrations/build-status/", s.middleware(s.integrationBuildStatusHandler))
 	
 	// Cluster management endpoints
 	http.HandleFunc("/cluster", s.middleware(s.clusterHandler))
