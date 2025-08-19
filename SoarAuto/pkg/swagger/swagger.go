@@ -803,8 +803,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			},
 			"/integrations/upload": map[string]interface{}{
 				"post": map[string]interface{}{
-					"summary":     "Upload Integration Script or Configuration",
-					"description": "Upload a Python integration script (.py) or configuration file (.json). JSON configurations trigger automatic backend dependency building.",
+					"summary":     "Upload Integration Definition and Script",
+					"description": "Upload both an integration definition (JSON) and Python script (.py). The definition contains metadata, dependencies, configuration fields, and function definitions. The script filename must match the entry_point specified in the definition. If requires_build is true, dependencies will be automatically installed.",
 					"tags":        []string{"Integrations"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"requestBody": map[string]interface{}{
@@ -814,24 +814,25 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 								"schema": map[string]interface{}{
 									"type": "object",
 									"properties": map[string]interface{}{
-										"file": map[string]interface{}{
+										"definition": map[string]interface{}{
+											"type":        "string",
+											"description": "JSON integration definition containing metadata, dependencies, configuration fields, and function definitions",
+											"example":     `{"name": "virustotal", "version": "1.0.0", "description": "VirusTotal API integration", "backend": {"entry_point": "virustotal.py", "requires_build": true}, "dependencies": {"packages": ["requests", "vt-py"]}, "configuration": {"api_key": {"type": "string", "required": true, "sensitive": true}}, "functions": {"scan_hash": {"description": "Scan file hash", "parameters": {"hash": {"type": "string", "required": true}}}}}`,
+										},
+										"script": map[string]interface{}{
 											"type":        "string",
 											"format":      "binary",
-											"description": "Python integration script (.py file) or configuration (.json file with dependencies)",
-										},
-										"name": map[string]interface{}{
-											"type":        "string",
-											"description": "Override integration name (optional)",
+											"description": "Python integration script file (.py) - filename must match the entry_point in definition",
 										},
 									},
-									"required": []string{"file"},
+									"required": []string{"definition", "script"},
 								},
 							},
 						},
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
-							"description": "Integration script uploaded successfully",
+							"description": "Integration uploaded and built successfully",
 							"content": map[string]interface{}{
 								"application/json": map[string]interface{}{
 									"schema": map[string]interface{}{
@@ -841,7 +842,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							},
 						},
 						"400": map[string]interface{}{
-							"description": "Invalid file or upload error",
+							"description": "Invalid integration definition JSON, missing required fields, or script filename doesn't match entry_point",
 						},
 						"500": map[string]interface{}{
 							"description": "Internal server error during upload",
@@ -1238,7 +1239,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 								"schema": map[string]interface{}{
 									"type": "object",
 									"properties": map[string]interface{}{
-										"file": map[string]interface{}{
+										"automation": map[string]interface{}{
 											"type":        "string",
 											"format":      "binary",
 											"description": "Python automation script (.py file)",
@@ -1248,7 +1249,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 											"description": "Override automation name (optional)",
 										},
 									},
-									"required": []string{"file"},
+									"required": []string{"automation"},
 								},
 							},
 						},
@@ -2524,9 +2525,17 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"type":        "string",
 							"description": "Uploaded integration name",
 						},
+						"version": map[string]interface{}{
+							"type":        "string",
+							"description": "Integration version from definition",
+						},
 						"filename": map[string]interface{}{
 							"type":        "string",
 							"description": "Uploaded file name",
+						},
+						"built": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether the integration environment was built successfully",
 						},
 						"size": map[string]interface{}{
 							"type":        "integer",

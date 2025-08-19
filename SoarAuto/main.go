@@ -104,28 +104,41 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 	)
 	jobManager := jobs.NewJobManager(jobStore)
 
+	// Get Python path from config
+	pythonPath := "python3"
+	if cfg.Python.VenvPath != "" {
+		pythonPath = filepath.Join(cfg.Python.VenvPath, "bin", "python")
+		if _, err := os.Stat(filepath.Join(cfg.Python.VenvPath, "Scripts", "python.exe")); err == nil {
+			pythonPath = filepath.Join(cfg.Python.VenvPath, "Scripts", "python.exe")
+		}
+	}
+
 	// Create integration manager
 	integrationManager := integrations.NewIntegrationManager(
 		cfg.Integrations.ConfigsPath,
 		cfg.Integrations.ScriptsPath,
+		pythonPath,
+		lgr,
 	)
 
 	// Create client integration manager
-	clientIntegrationManager := integrations.NewClientIntegrationManager(
-		integrationManager,
+	clientIntegrationManager, err := integrations.NewClientIntegrationManager(
 		filepath.Join("data", "clients"),
+		lgr,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client integration manager: %v", err)
+	}
 
 	// Create automation manager
-	automationManager := automations.NewAutomationManager(
-		filepath.Join("data", "automations", "scripts"),
-		filepath.Join("data", "automations", "metadata"),
-	)
+	// Get absolute paths to ensure they work regardless of working directory
+	scriptsPath, _ := filepath.Abs(filepath.Join("data", "automations", "scripts"))
+	metadataPath, _ := filepath.Abs(filepath.Join("data", "automations", "metadata"))
+	automationManager := automations.NewAutomationManager(scriptsPath, metadataPath)
 
 	// Create playbook manager
-	playbookManager := playbooks.NewPlaybookManager(
-		filepath.Join("data", "playbooks"),
-	)
+	playbooksPath, _ := filepath.Abs(filepath.Join("data", "playbooks"))
+	playbookManager := playbooks.NewPlaybookManager(playbooksPath)
 
 	// Create client manager
 	clientManager, err := clients.NewClientManager(
@@ -738,78 +751,40 @@ func (s *SecAutoServer) listHandler(w http.ResponseWriter, r *http.Request) {
 
 // integrationsHandler handles integration listing and creation
 func (s *SecAutoServer) integrationsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
-	switch r.Method {
-	case http.MethodGet:
-		// List all integrations
-		configs := s.integrationManager.ListConfigs()
-		response := types.IntegrationResponse{
-			Success:      true,
-			Message:      "Integrations retrieved successfully",
-			Integrations: make([]*types.IntegrationConfig, 0, len(configs)),
-			Timestamp:    time.Now().UTC().Format(time.RFC3339),
-		}
-
-		for _, config := range configs {
-			response.Integrations = append(response.Integrations, config)
-		}
-
-		json.NewEncoder(w).Encode(response)
-
-	case http.MethodPost:
-		// Create new integration
-		var config types.IntegrationConfig
-		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Extract name from URL or body
-		name := config.Name
-		if name == "" {
-			http.Error(w, "Integration name is required", http.StatusBadRequest)
-			return
-		}
-
-		// Validate configuration
-		if errors := s.integrationManager.ValidateIntegrationConfig(&config); len(errors) > 0 {
-			response := types.ValidationResponse{
-				Success:   false,
-				Valid:     false,
-				Errors:    errors,
-				Message:   "Validation failed",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		// Create integration
-		if err := s.integrationManager.CreateConfig(name, &config); err != nil {
-			response := types.IntegrationResponse{
-				Success:   false,
-				Message:   fmt.Sprintf("Failed to create integration: %v", err),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		response := types.IntegrationResponse{
-			Success:     true,
-			Message:     "Integration created successfully",
-			Integration: &config,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		}
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// List all global integrations
+	definitions := s.integrationManager.ListIntegrations()
+	
+	integrations := make([]map[string]interface{}, 0, len(definitions))
+	for _, def := range definitions {
+		integrations = append(integrations, map[string]interface{}{
+			"name":         def.Name,
+			"version":      def.Version,
+			"description":  def.Description,
+			"author":       def.Author,
+			"functions":    def.Functions,
+			"configuration": def.Configuration,
+			"created_at":   def.CreatedAt,
+			"updated_at":   def.UpdatedAt,
+			"built":        s.integrationManager.IsIntegrationBuilt(def.Name),
+		})
 	}
+
+	response := map[string]interface{}{
+		"success":      true,
+		"message":      "Integrations retrieved successfully",
+		"integrations": integrations,
+		"count":        len(integrations),
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	json.NewEncoder(w).Encode(response)
 }
 
 // integrationHandler handles specific integration operations
@@ -826,85 +801,44 @@ func (s *SecAutoServer) integrationHandler(w http.ResponseWriter, r *http.Reques
 	switch r.Method {
 	case http.MethodGet:
 		// Get specific integration
-		config, exists := s.integrationManager.GetConfig(path)
-		if !exists {
-			response := types.IntegrationResponse{
-				Success:   false,
-				Message:   "Integration not found",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+		definition, err := s.integrationManager.GetIntegration(path)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   "Integration not found",
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
 			}
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		response := types.IntegrationResponse{
-			Success:     true,
-			Message:     "Integration retrieved successfully",
-			Integration: config,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
-		}
-		json.NewEncoder(w).Encode(response)
-
-	case http.MethodPut:
-		// Update integration
-		var config types.IntegrationConfig
-		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Validate configuration
-		if errors := s.integrationManager.ValidateIntegrationConfig(&config); len(errors) > 0 {
-			response := types.ValidationResponse{
-				Success:   false,
-				Valid:     false,
-				Errors:    errors,
-				Message:   "Validation failed",
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		// Update integration
-		if err := s.integrationManager.UpdateConfig(path, &config); err != nil {
-			response := types.IntegrationResponse{
-				Success:   false,
-				Message:   fmt.Sprintf("Failed to update integration: %v", err),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		response := types.IntegrationResponse{
-			Success:     true,
-			Message:     "Integration updated successfully",
-			Integration: &config,
-			Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		response := map[string]interface{}{
+			"success":     true,
+			"message":     "Integration retrieved successfully",
+			"integration": definition,
+			"built":       s.integrationManager.IsIntegrationBuilt(definition.Name),
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		}
 		json.NewEncoder(w).Encode(response)
 
 	case http.MethodDelete:
 		// Delete integration
-		if err := s.integrationManager.DeleteConfig(path); err != nil {
-			response := types.IntegrationResponse{
-				Success:   false,
-				Message:   fmt.Sprintf("Failed to delete integration: %v", err),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
+		if err := s.integrationManager.DeleteIntegration(path); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete integration: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
 			}
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(response)
 			return
 		}
 
-		response := types.IntegrationResponse{
-			Success:   true,
-			Message:   "Integration deleted successfully",
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		response := map[string]interface{}{
+			"success":   true,
+			"message":   "Integration deleted successfully",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
 		json.NewEncoder(w).Encode(response)
 
@@ -913,7 +847,7 @@ func (s *SecAutoServer) integrationHandler(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// integrationUploadHandler handles integration file uploads (both .py scripts and .json configs)
+// integrationUploadHandler handles integration uploads (definition + script)
 func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -922,102 +856,83 @@ func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/json")
 
-	// Parse multipart form
-	if err := r.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
+	// Parse multipart form (50MB max for integration uploads)
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		http.Error(w, "Failed to parse form", http.StatusBadRequest)
 		return
 	}
 
-	// Get file from form
-	file, handler, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "File is required", http.StatusBadRequest)
+	// Get integration definition from form field
+	definitionStr := r.FormValue("definition")
+	if definitionStr == "" {
+		http.Error(w, "Integration definition is required", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
 
-	// Get integration name
-	name := r.FormValue("name")
-	if name == "" {
-		// Extract from filename
-		name = strings.TrimSuffix(handler.Filename, filepath.Ext(handler.Filename))
-	}
-
-	// Sanitize the name to prevent path traversal
-	name = security.SanitizeFilename(name)
-	
-	// Additional validation
-	if err := security.ValidateUploadName(name); err != nil {
-		response := types.IntegrationUploadResponse{
-			Success:   false,
-			Message:   fmt.Sprintf("Invalid integration name: %v", err),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+	// Parse integration definition
+	var definition integrations.IntegrationDefinition
+	if err := json.Unmarshal([]byte(definitionStr), &definition); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Invalid integration definition: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		}
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(response)
 		return
 	}
 
-	// Read file content
-	content, err := io.ReadAll(file)
+	// Get script file
+	scriptFile, handler, err := r.FormFile("script")
 	if err != nil {
-		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		http.Error(w, "Integration script file is required", http.StatusBadRequest)
+		return
+	}
+	defer scriptFile.Close()
+
+	// Validate script filename matches entry point
+	if handler.Filename != definition.Backend.EntryPoint {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Script filename '%s' does not match entry point '%s'", handler.Filename, definition.Backend.EntryPoint),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
-	// Check if this is a JSON configuration file
-	isConfig := strings.HasSuffix(handler.Filename, "_config.json") || strings.HasSuffix(handler.Filename, ".json")
-	
-	if isConfig {
-		// Save configuration file and trigger build
-		configPath := filepath.Join("../integrations", name+"_config.json")
-		if err := os.WriteFile(configPath, content, 0644); err != nil {
-			response := types.IntegrationUploadResponse{
-				Success:   false,
-				Message:   fmt.Sprintf("Failed to save integration config: %v", err),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		
-		// Trigger backend build for the integration
-		buildResult := s.triggerIntegrationBuild(configPath, name)
-		
-		response := types.IntegrationUploadResponse{
-			Success:         buildResult["success"].(bool),
-			Message:         "Integration configuration uploaded and build triggered",
-			IntegrationName: name,
-			Filename:        handler.Filename,
-			Size:            handler.Size,
-			Timestamp:       time.Now().UTC().Format(time.RFC3339),
-			Metadata:        buildResult,
-		}
-		json.NewEncoder(w).Encode(response)
-	} else {
-		// Save integration Python file
-		if err := s.integrationManager.SaveIntegrationFile(name, content); err != nil {
-			response := types.IntegrationUploadResponse{
-				Success:   false,
-				Message:   fmt.Sprintf("Failed to save integration file: %v", err),
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-
-		response := types.IntegrationUploadResponse{
-			Success:         true,
-			Message:         "Integration file uploaded successfully",
-			IntegrationName: name,
-			Filename:        handler.Filename,
-			Size:            handler.Size,
-			Timestamp:       time.Now().UTC().Format(time.RFC3339),
-		}
-		json.NewEncoder(w).Encode(response)
+	// Read script content
+	scriptContent, err := io.ReadAll(scriptFile)
+	if err != nil {
+		http.Error(w, "Failed to read script file", http.StatusInternalServerError)
+		return
 	}
+
+	// Upload the integration using the IntegrationManager
+	if err := s.integrationManager.UploadIntegration(&definition, scriptContent); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to upload integration: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Success response
+	response := map[string]interface{}{
+		"success":          true,
+		"message":          "Integration uploaded and built successfully",
+		"integration_name": definition.Name,
+		"version":          definition.Version,
+		"filename":         handler.Filename,
+		"size":             handler.Size,
+		"built":            s.integrationManager.IsIntegrationBuilt(definition.Name),
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 // triggerIntegrationBuild triggers the Python script to build integration backend
@@ -1144,6 +1059,306 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 		response["integration"] = integrationName
 	}
 	
+	json.NewEncoder(w).Encode(response)
+}
+
+// clientIntegrationsHandler handles listing client integrations
+func (s *SecAutoServer) clientIntegrationsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract client ID from URL path
+	path := strings.TrimPrefix(r.URL.Path, "/clients/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[1] != "integrations" {
+		http.Error(w, "Invalid URL path", http.StatusBadRequest)
+		return
+	}
+	clientID := parts[0]
+
+	// Verify client exists
+	if _, err := s.clientManager.GetClient(clientID); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Client not found: %s", clientID),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get client integrations
+	configs, err := s.clientIntegrationManager.ListClientIntegrations(clientID)
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Failed to list client integrations: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":      true,
+		"message":      "Client integrations retrieved successfully",
+		"client_id":    clientID,
+		"integrations": configs,
+		"count":        len(configs),
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// clientIntegrationConfigHandler handles client-specific integration configuration
+func (s *SecAutoServer) clientIntegrationConfigHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract client ID and integration name from URL
+	path := strings.TrimPrefix(r.URL.Path, "/clients/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[1] != "integrations" || parts[3] != "config" {
+		http.Error(w, "Invalid URL path", http.StatusBadRequest)
+		return
+	}
+	clientID := parts[0]
+	integrationName := parts[2]
+
+	// Verify client exists
+	if _, err := s.clientManager.GetClient(clientID); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Client not found: %s", clientID),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Verify integration exists
+	if _, err := s.integrationManager.GetIntegration(integrationName); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Integration not found: %s", integrationName),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Get client integration config
+		config, err := s.clientIntegrationManager.GetClientIntegrationConfig(clientID, integrationName)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to get integration config: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":     true,
+			"message":     "Integration config retrieved successfully",
+			"client_id":   clientID,
+			"integration": integrationName,
+			"config":      config,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodPost, http.MethodPut:
+		// Create or update client integration config
+		var config integrations.ClientIntegrationConfig
+		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		// Set required fields
+		config.Name = integrationName
+		config.ClientID = clientID
+
+		// Validate against global integration
+		globalIntegration, err := s.integrationManager.GetIntegration(integrationName)
+		if err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to get global integration: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if err := s.clientIntegrationManager.ValidateClientConfig(&config, globalIntegration); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Configuration validation failed: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Save the configuration
+		if err := s.clientIntegrationManager.SaveClientIntegrationConfig(clientID, &config); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to save integration config: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		statusCode := http.StatusCreated
+		if r.Method == http.MethodPut {
+			statusCode = http.StatusOK
+		}
+
+		response := map[string]interface{}{
+			"success":     true,
+			"message":     "Integration config saved successfully",
+			"client_id":   clientID,
+			"integration": integrationName,
+			"config":      config,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(statusCode)
+		json.NewEncoder(w).Encode(response)
+
+	case http.MethodDelete:
+		// Delete client integration config
+		if err := s.clientIntegrationManager.DeleteClientIntegrationConfig(clientID, integrationName); err != nil {
+			response := map[string]interface{}{
+				"success":   false,
+				"message":   fmt.Sprintf("Failed to delete integration config: %v", err),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		response := map[string]interface{}{
+			"success":     true,
+			"message":     "Integration config deleted successfully",
+			"client_id":   clientID,
+			"integration": integrationName,
+			"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// clientIntegrationExecuteHandler handles executing integrations for clients
+func (s *SecAutoServer) clientIntegrationExecuteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Extract client ID and integration name from URL
+	path := strings.TrimPrefix(r.URL.Path, "/clients/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[1] != "integrations" || parts[3] != "execute" {
+		http.Error(w, "Invalid URL path", http.StatusBadRequest)
+		return
+	}
+	clientID := parts[0]
+	integrationName := parts[2]
+
+	// Parse request body
+	var request struct {
+		Function string                 `json:"function"`
+		Params   map[string]interface{} `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Verify client exists
+	if _, err := s.clientManager.GetClient(clientID); err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Client not found: %s", clientID),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get client integration config
+	clientConfig, err := s.clientIntegrationManager.GetClientIntegrationConfig(clientID, integrationName)
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Client integration config not found: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Check if integration is enabled for this client
+	if !clientConfig.Enabled {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Integration is disabled for this client",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Execute the integration
+	result, err := s.integrationManager.ExecuteIntegration(integrationName, clientConfig, request.Function, request.Params)
+	if err != nil {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   fmt.Sprintf("Integration execution failed: %v", err),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"message":     "Integration executed successfully",
+		"client_id":   clientID,
+		"integration": integrationName,
+		"function":    request.Function,
+		"result":      result,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	}
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -1624,7 +1839,7 @@ func (s *SecAutoServer) automationUploadHandler(w http.ResponseWriter, r *http.R
 	}
 
 	// Get the file
-	file, handler, err := r.FormFile("file")
+	file, handler, err := r.FormFile("automation")
 	if err != nil {
 		response := map[string]interface{}{
 			"success":   false,
@@ -2807,14 +3022,25 @@ func (s *SecAutoServer) clientHandler(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 	clientID := parts[0]
 
-	switch r.Method {
-	case http.MethodGet:
-		if len(parts) > 1 && parts[1] == "integrations" {
-			// Handle client integrations
-			s.handleClientIntegrations(w, r, clientID, parts[2:])
+	// Route to client integration handlers
+	if len(parts) > 1 && parts[1] == "integrations" {
+		if len(parts) == 2 {
+			// /clients/{id}/integrations - list integrations
+			s.clientIntegrationsHandler(w, r)
+			return
+		} else if len(parts) == 4 && parts[3] == "config" {
+			// /clients/{id}/integrations/{name}/config
+			s.clientIntegrationConfigHandler(w, r)
+			return
+		} else if len(parts) == 4 && parts[3] == "execute" {
+			// /clients/{id}/integrations/{name}/execute
+			s.clientIntegrationExecuteHandler(w, r)
 			return
 		}
+	}
 
+	switch r.Method {
+	case http.MethodGet:
 		// Get specific client
 		client, err := s.clientManager.GetClient(clientID)
 		if err != nil {
@@ -2837,11 +3063,6 @@ func (s *SecAutoServer) clientHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(response)
 
 	case http.MethodPost:
-		if len(parts) > 1 && parts[1] == "integrations" {
-			// Handle client integrations
-			s.handleClientIntegrations(w, r, clientID, parts[2:])
-			return
-		}
 		
 		// No other POST operations for individual clients
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -2907,118 +3128,6 @@ func (s *SecAutoServer) clientHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleClientIntegrations handles client-specific integration operations
-func (s *SecAutoServer) handleClientIntegrations(w http.ResponseWriter, r *http.Request, clientID string, pathParts []string) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		if len(pathParts) == 0 {
-			// List client integrations
-			configs, err := s.clientIntegrationManager.ListClientConfigs(clientID)
-			if err != nil {
-				response := map[string]interface{}{
-					"success":   false,
-					"message":   fmt.Sprintf("Failed to list client integrations: %v", err),
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-
-			response := map[string]interface{}{
-				"success":      true,
-				"message":      "Client integrations retrieved successfully",
-				"integrations": configs,
-				"count":        len(configs),
-				"timestamp":    time.Now().UTC().Format(time.RFC3339),
-			}
-			json.NewEncoder(w).Encode(response)
-		} else {
-			// Get specific client integration
-			integrationName := pathParts[0]
-			config, exists := s.clientIntegrationManager.GetClientConfig(clientID, integrationName)
-			if !exists {
-				response := map[string]interface{}{
-					"success":   false,
-					"message":   "Integration not found",
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-				w.WriteHeader(http.StatusNotFound)
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-
-			response := map[string]interface{}{
-				"success":     true,
-				"message":     "Client integration retrieved successfully",
-				"integration": config,
-				"timestamp":   time.Now().UTC().Format(time.RFC3339),
-			}
-			json.NewEncoder(w).Encode(response)
-		}
-
-	case http.MethodPost:
-		if len(pathParts) == 0 {
-			// Create client integration
-			var request struct {
-				Name   string                 `json:"name"`
-				Config *types.IntegrationConfig `json:"config"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				response := map[string]interface{}{
-					"success":   false,
-					"message":   "Invalid JSON format",
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-
-			if request.Name == "" || request.Config == nil {
-				response := map[string]interface{}{
-					"success":   false,
-					"message":   "Integration name and config are required",
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-				w.WriteHeader(http.StatusBadRequest)
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-
-			// Set client-specific fields
-			request.Config.ClientID = clientID
-
-			if err := s.clientIntegrationManager.CreateClientConfig(clientID, request.Name, request.Config); err != nil {
-				response := map[string]interface{}{
-					"success":   false,
-					"message":   fmt.Sprintf("Failed to create client integration: %v", err),
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-
-			response := map[string]interface{}{
-				"success":   true,
-				"message":   "Client integration created successfully",
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-			}
-			json.NewEncoder(w).Encode(response)
-
-			s.clientManager.AuditLog(clientID, "integration_created", map[string]interface{}{
-				"integration_name": request.Name,
-				"integration_type": request.Config.Type,
-			})
-		}
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
 
 // Run starts the modular server
 func (s *SecAutoServer) Run() error {
@@ -3077,6 +3186,8 @@ func (s *SecAutoServer) Run() error {
 	// Client management endpoints
 	http.HandleFunc("/clients", s.middleware(s.clientsHandler))
 	http.HandleFunc("/clients/", s.middleware(s.clientHandler))
+	
+	// Note: Client integration endpoints are handled within the clientHandler using path routing
 	
 	// Swagger/API documentation endpoints
 	http.HandleFunc("/docs", s.publicMiddleware(s.swagger.ServeHTTP))

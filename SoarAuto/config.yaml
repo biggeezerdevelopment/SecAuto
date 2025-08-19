@@ -201,8 +201,8 @@ security:
 # Python Configuration
 python:
   venv_path: "../Venv"
-  scripts_path: "../automations"
-  playbooks_path: "../playbooks"
+  scripts_path: "data/automations/scripts"
+  playbooks_path: "data/playbooks"
   default_script: "default_automation.py"
   script_timeout: 300
   max_script_memory: 512
@@ -230,3 +230,105 @@ integrations:
     blocked_hosts: []
     max_connections: 100
     connection_timeout: 30
+
+# Scheduler Configuration
+scheduler:
+  enabled: true
+  storage_path: "data/schedules"
+  max_schedules: 100
+  default_timezone: "UTC"
+  cleanup_interval: 3600
+  retry_failed_jobs: true
+  max_retries: 3
+  retry_delay: 300
+
+# Webhooks Configuration  
+webhooks:
+  enabled: true
+  storage_path: "data/webhooks"
+  max_webhooks: 50
+  timeout: 30
+  retry_count: 3
+  retry_delay: 5
+  events: ["job_completed", "job_failed", "playbook_completed", "alert_triggered"]
+  default_headers:
+    Content-Type: "application/json"
+    User-Agent: "SecAuto/1.0"
+
+# Rules Engine Configuration
+rules_engine:
+  enabled: true
+  cache_enabled: true
+  cache_ttl: 3600
+  max_depth: 10
+  timeout: 300
+  strict_mode: false
+  allow_external_scripts: true
+  script_timeout: 300
+
+# Monitoring Configuration
+monitoring:
+  enabled: false
+  metrics_port: 9091
+  health_check_interval: 30
+  collect_system_metrics: true
+  collect_application_metrics: true
+  export_format: "prometheus"
+
+# Performance Configuration
+performance:
+  cache_enabled: true
+  cache_size: 1000
+  cache_ttl: 3600
+  connection_pooling: true
+  pool_size: 10
+  pool_timeout: 30
+  async_processing: true
+  worker_count: 5
+  queue_size: 100
+  batch_processing: true
+  batch_size: 10
+  compression_enabled: false
+  compression_level: 6
+
+# Development Configuration
+development:
+  debug_mode: false
+  verbose_logging: false
+  enable_profiling: false
+  profiling_port: 6060
+  enable_tracing: false
+  tracing_endpoint: "localhost:6831"
+  mock_integrations: false
+  test_mode: false
+
+# Backup Configuration
+backup:
+  enabled: false
+  storage_path: "data/backups"
+  schedule: "0 2 * * *"
+  retention_days: 30
+  compress: true
+  encrypt: false
+  encryption_key: ""
+  backup_types: ["config", "data", "logs"]
+
+# Notifications Configuration
+notifications:
+  enabled: false
+  email:
+    enabled: false
+    smtp_host: "smtp.example.com"
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_address: "secauto@example.com"
+    use_tls: true
+  slack:
+    enabled: false
+    webhook_url: ""
+    channel: "#security-alerts"
+    username: "SecAuto"
+  teams:
+    enabled: false
+    webhook_url: ""
