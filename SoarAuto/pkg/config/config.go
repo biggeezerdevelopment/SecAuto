@@ -22,7 +22,6 @@ type Config struct {
 	Scheduler     SchedulerConfig     `yaml:"scheduler"`
 	Plugins       PluginsConfig       `yaml:"plugins"`
 	Security      SecurityConfig      `yaml:"security"`
-	Webhooks      WebhooksConfig      `yaml:"webhooks"`
 	Python        PythonConfig        `yaml:"python"`
 	RulesEngine   RulesEngineConfig   `yaml:"rules_engine"`
 	Monitoring    MonitoringConfig    `yaml:"monitoring"`
@@ -197,7 +196,6 @@ type EndpointRateLimits struct {
 	JobStats      int `yaml:"job_stats"`      // /jobs/stats endpoint
 	JobMetrics    int `yaml:"job_metrics"`    // /jobs/metrics endpoint
 	Context       int `yaml:"context"`        // /context endpoint
-	Webhooks      int `yaml:"webhooks"`       // /webhooks endpoint
 	Plugins       int `yaml:"plugins"`        // /plugins endpoints
 	Cluster       int `yaml:"cluster"`        // /cluster endpoints
 	Schedules     int `yaml:"schedules"`      // /schedules endpoints
@@ -252,16 +250,6 @@ type ClientAuthConfig struct {
 	RequireCert bool   `yaml:"require_cert"`
 }
 
-// WebhooksConfig holds webhook configuration
-type WebhooksConfig struct {
-	Enabled        bool              `yaml:"enabled"`
-	Timeout        int               `yaml:"timeout"`
-	RetryCount     int               `yaml:"retry_count"`
-	RetryDelay     int               `yaml:"retry_delay"`
-	MaxWebhooks    int               `yaml:"max_webhooks"`
-	Events         []string          `yaml:"events"`
-	DefaultHeaders map[string]string `yaml:"default_headers"`
-}
 
 // PythonConfig holds Python integration configuration
 type PythonConfig struct {
