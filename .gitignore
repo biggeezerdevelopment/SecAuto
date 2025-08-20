@@ -7,6 +7,8 @@ ENV/
 .venv/
 .cursor
 .json
+.claude/
+CLAUDE.md
 # Project specific
 phishing_pot/
 
