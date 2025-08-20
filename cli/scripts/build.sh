@@ -205,6 +205,17 @@ check_deps() {
         print_error "Failed to tidy Go modules"
         exit 1
     fi
+    
+    # Run tests if available
+    if [[ -n "$(find . -name '*_test.go' -print -quit)" ]]; then
+        print_status "Running tests..."
+        go test ./...
+        if [[ $? -ne 0 ]]; then
+            print_warning "Tests failed, but continuing with build"
+        else
+            print_success "All tests passed"
+        fi
+    fi
 }
 
 # Main function

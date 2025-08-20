@@ -3,206 +3,295 @@
 ![SecAuto Logo](https://img.shields.io/badge/SecAuto-SOAR-blue)
 ![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8)
 ![Python Version](https://img.shields.io/badge/Python-3.9+-3776AB)
-![Redis](https://img.shields.io/badge/Redis-Cache-DC382D)
+![Redis](https://img.shields.io/badge/Redis-7.0+-DC382D)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-**SecAuto** is a powerful, scalable Security Orchestration, Automation, and Response (SOAR) platform designed to streamline cybersecurity operations through intelligent automation, flexible playbooks, and comprehensive integration capabilities.
+**SecAuto** is a powerful, enterprise-grade Security Orchestration, Automation, and Response (SOAR) platform designed to streamline cybersecurity operations through intelligent automation, flexible playbooks, and comprehensive integration capabilities.
 
-## 🚀 Features
+## 🚀 Key Features
 
 ### Core Capabilities
-- **🎭 Playbook Engine**: JSON-based workflow automation with complex logic support
-- **🔧 Automation Scripts**: Python-based automation with rich integration libraries
-- **🔌 Plugin System**: Extensible plugin architecture for Go, Python, and platform-specific plugins
-- **⚡ Redis Cache API**: High-performance caching for automation results and data sharing
-- **🌐 Distributed Clustering**: Multi-node deployment with Redis-based coordination
-- **📊 Job Management**: Asynchronous job execution with persistence and monitoring
-- **⏰ Job Scheduling**: Cron-based scheduling system for automated workflows
-- **🔗 Integration Framework**: Seamless integration with external security tools
-- **🪝 Webhook System**: Real-time notifications and event-driven automation
-- **🛡️ Security Features**: API key authentication, rate limiting, input validation
+- **🎭 Advanced Playbook Engine**: JSON-based workflow automation with conditional logic, loops, and parallel execution
+- **🐍 Python Automation Framework**: Extensible Python scripts with built-in helper libraries
+- **🔌 Multi-Platform Plugin System**: Support for Go, Python, Windows, and Linux plugins
+- **⚡ High-Performance Caching**: Redis-based cache API with TTL and lazy evaluation
+- **🌐 Distributed Architecture**: Multi-node clustering with Redis coordination
+- **📊 Comprehensive Job Management**: Async execution, persistence, retry logic, and monitoring
+- **⏰ Cron-Based Scheduling**: Automated workflow scheduling with timezone support
+- **🔗 Rich Integration Ecosystem**: Pre-built integrations for security tools
+- **🪝 Event-Driven Automation**: Webhook system for real-time event processing
+- **🛡️ Enterprise Security**: API keys, rate limiting, TLS/HTTPS, client certificates
 
 ### Management & Monitoring
-- **📈 Performance Metrics**: Comprehensive monitoring and performance tracking
-- **📝 Structured Logging**: Advanced logging with rotation and filtering
-- **🔍 Validation System**: Input validation and playbook verification
-- **📚 API Documentation**: Interactive Swagger UI documentation
-- **🌍 CORS Support**: Full cross-origin resource sharing support
-- **🔒 HTTPS Support**: TLS/SSL encryption with automatic certificates
+- **📈 Performance Optimization**: Async operations, connection pooling, and profiling
+- **📝 Advanced Logging**: JSON structured logs with rotation, compression, and filtering
+- **🔍 Input Validation**: Comprehensive validation for APIs and playbooks
+- **📚 Interactive API Docs**: Swagger UI with live testing
+- **🌍 CORS Configuration**: Flexible cross-origin resource sharing
+- **🔒 TLS/HTTPS**: Full encryption with auto-certificate management
 
-## 🏗️ Architecture
+## 🏗️ System Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web UI/CLI    │    │   External      │    │   Automation    │
-│                 │    │   Integrations  │    │   Scripts       │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
-                                 │
-          ┌─────────────────────────────────────────────┐
-          │             SecAuto API Layer               │
-          │  ┌─────────┐ ┌─────────┐ ┌─────────────────┐│
-          │  │  Auth   │ │  Rate   │ │   Validation    ││
-          │  │ System  │ │Limiting │ │    System       ││
-          │  └─────────┘ └─────────┘ └─────────────────┘│
-          └─────────────────────┬───────────────────────┘
-                                │
-    ┌───────────────────────────┼───────────────────────────┐
-    │                          │                           │
-┌───▼────┐              ┌──────▼──────┐              ┌─────▼─────┐
-│Playbook│              │    Rules    │              │   Cache   │
-│Engine  │◄────────────►│   Engine    │◄────────────►│   API     │
-└────────┘              └─────┬───────┘              └───────────┘
-    │                         │                           │
-    │                    ┌────▼────┐                      │
-    │                    │   Job   │                      │
-    │                    │ Manager │                      │
-    │                    └────┬────┘                      │
-    │                         │                           │
-    └─────────────────────────┼───────────────────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │      Redis        │
-                    │   Data Store      │
-                    └───────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        Client Layer                         │
+├──────────────┬──────────────┬──────────────┬──────────────┤
+│   Web UI     │   CLI Tools  │  External    │  Monitoring  │
+│              │              │  Systems     │   Tools      │
+└──────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┘
+       │              │              │              │
+       └──────────────┴──────────────┴──────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   API Gateway   │
+                    │   (Port 9090)   │
+                    └────────┬────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          │          Middleware Stack           │
+          ├─────────────┬────┴────┬─────────────┤
+          │   Auth      │  Rate   │  CORS &     │
+          │   System    │  Limit  │  Security   │
+          └─────────────┴────┬────┴─────────────┘
+                             │
+     ┌───────────────────────┼───────────────────────┐
+     │                Core Services                  │
+     ├──────────┬──────────┬─┴──────────┬──────────┤
+     │ Playbook │  Rules   │   Job      │  Cache   │
+     │  Engine  │  Engine  │  Manager   │   API    │
+     └──────┬───┴──────┬───┴──────┬─────┴──────────┘
+            │          │          │
+     ┌──────▼──────────▼──────────▼──────┐
+     │        Redis Data Store           │
+     │   • Jobs  • Cache  • Schedules    │
+     │   • Locks • State  • Metadata     │
+     └───────────────────────────────────┘
+            │                    │
+     ┌──────▼──────┐      ┌─────▼──────┐
+     │  Python     │      │   Plugin   │
+     │ Automations │      │   System   │
+     └─────────────┘      └────────────┘
 ```
 
 ## 📦 Installation
 
 ### Prerequisites
-- **Go 1.22+**
-- **Python 3.9+**
-- **Redis Server**
-- **Git**
+- **Go 1.22+** - [Download](https://golang.org/dl/)
+- **Python 3.9+** - [Download](https://www.python.org/downloads/)
+- **Redis 7.0+** - [Download](https://redis.io/download)
+- **Git** - [Download](https://git-scm.com/downloads)
 
 ### Quick Start
 
-1. **Clone the Repository**
+#### 1. Clone Repository
 ```bash
 git clone https://github.com/your-org/secauto.git
-cd secauto
+cd SecAuto
 ```
 
-2. **Setup Python Virtual Environment**
+#### 2. Setup Python Environment
 ```bash
 python3 -m venv Venv
 source Venv/bin/activate  # On Windows: Venv\Scripts\activate
-pip install -r requirements.txt
+# Note: No requirements.txt needed - dependencies handled per automation
 ```
 
-3. **Configure Redis**
+#### 3. Install & Configure Redis
 ```bash
-# Install Redis (Ubuntu/Debian)
-sudo apt update && sudo apt install redis-server
+# macOS
+brew install redis
+brew services start redis
 
-# Start Redis
+# Ubuntu/Debian
+sudo apt update && sudo apt install redis-server
 sudo systemctl start redis-server
 sudo systemctl enable redis-server
+
+# Verify Redis
+redis-cli ping  # Should return PONG
 ```
 
-4. **Build SecAuto**
+#### 4. Build SecAuto
 ```bash
 cd SoarAuto
 go mod tidy
-go build -o soarauto.exe .
+go build -o secauto .        # macOS/Linux
+go build -o soarauto.exe .   # Windows
 ```
 
-5. **Configure SecAuto**
-```bash
-# Edit configuration
-nano config.yaml
-```
-
-6. **Run SecAuto**
-```bash
-./soarauto.exe
-```
-
-The API will be available at `http://localhost:8000`
-
-## 🔧 Configuration
-
-SecAuto uses a comprehensive YAML configuration file (`config.yaml`):
-
+#### 5. Configure SecAuto
+Edit `SoarAuto/config.yaml`:
 ```yaml
-# Server Configuration
 server:
-  port: "8000"
+  port: 9090
+  host: "localhost"
   
-# Database Configuration  
 database:
   redis_url: "redis://localhost:6379/0"
   
+security:
+  api_keys:
+    - "your-secure-api-key-here"
+```
+
+#### 6. Run SecAuto
+```bash
+./secauto       # macOS/Linux
+./soarauto.exe  # Windows
+```
+
+API available at: `http://localhost:9090`
+Documentation at: `http://localhost:9090/docs`
+
+## 🔧 Configuration
+
+### Complete Configuration Example
+```yaml
+# Server Configuration
+server:
+  port: 9090
+  host: "localhost"
+  workers: 5
+  read_timeout: "30s"
+  write_timeout: "30s"
+  
+  # TLS/HTTPS Configuration
+  tls:
+    enabled: false
+    port: 9443
+    cert_file: "certs/server.crt"
+    key_file: "certs/server.key"
+    auto_redirect: true
+    min_version: "1.2"
+
+# Database Configuration
+database:
+  redis_url: "redis://localhost:6379/0"
+  cache_ttl: 3600      # 1 hour
+  job_ttl: 86400       # 24 hours
+  temp_data_ttl: 300   # 5 minutes
+
+# Cluster Configuration
+cluster:
+  enabled: false
+  redis_url: "redis://localhost:6379/1"
+  node_id: "node-1"
+  heartbeat_interval: 30
+  job_timeout: 3600
+
 # Security Configuration
 security:
   api_keys:
-    - "secauto-api-key-2024-07-14"
+    - "your-api-key-here"
   rate_limiting:
     enabled: true
     requests_per_minute: 100
-    endpoints:
-      cache: 200
-      playbook: 50
-      
+
 # Python Environment
 python:
   venv_path: "../Venv"
-  
-# Logging
+
+# Logging Configuration
 logging:
-  level: "info"
+  level: "INFO"
+  destination: "both"  # console, file, or both
   file: "logs/secauto.log"
-  max_size: 100
-  max_backups: 5
+  format: "json"
+  rotation:
+    max_size_mb: 10
+    max_backups: 5
+    max_age_days: 30
+    compress: true
+  component_levels:
+    rules_engine: "WARNING"
+    redis_integration: "ERROR"
+    job_manager: "INFO"
+
+# Plugin System
+plugins:
+  enabled: true
+  directory: "../plugins"
 ```
 
-## 🎯 API Endpoints
+## 🎯 API Reference
 
-### Core APIs
+### Authentication
+All API endpoints (except `/health` and `/docs`) require the `X-API-Key` header:
+```bash
+curl -H "X-API-Key: your-api-key-here" http://localhost:9090/endpoint
+```
 
+### Core Endpoints
+
+#### Playbook Execution
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/playbook` | POST | Execute playbook (sync) |
-| `/playbook/async` | POST | Execute playbook (async) |
+| `/playbook` | POST | Execute playbook synchronously |
+| `/playbook/async` | POST | Execute playbook asynchronously |
+| `/playbook/upload` | POST | Upload new playbook |
+| `/playbook/{name}` | DELETE | Delete playbook |
+| `/playbooks` | GET | List all playbooks |
+
+#### Job Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/jobs` | GET | List all jobs |
-| `/job/{id}` | GET | Get job status |
+| `/jobs/stats` | GET | Job statistics |
+| `/job/{id}` | GET | Get job details |
+| `/job/{id}` | DELETE | Cancel/delete job |
 
-### Cache API (🆕)
-
+#### Cache API
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/cache` | GET | Get cache information |
-| `/cache/{key}` | GET | Retrieve cached value |
-| `/cache/{key}` | POST | Store value in cache |
-| `/cache/{key}` | DELETE | Delete cached value |
+| `/cache` | GET | Cache information |
+| `/cache/stats` | GET | Cache statistics |
+| `/cache/clear` | POST | Clear all cache |
+| `/cache/{key}` | GET | Retrieve value |
+| `/cache/{key}` | POST | Store value |
+| `/cache/{key}` | DELETE | Delete value |
 
-### Management APIs
-
+#### Automation Management
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/automations` | GET | List automations |
 | `/automation` | POST | Upload automation |
-| `/playbooks` | GET | List playbooks |
+| `/automation/{name}` | DELETE | Delete automation |
+| `/automation/metadata` | GET/POST | Manage metadata |
+
+#### Schedule Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/schedules` | GET/POST | List/create schedules |
+| `/schedules/stats` | GET | Schedule statistics |
+| `/schedule/{id}` | GET/PUT/DELETE | Manage schedule |
+| `/schedule/execute/{id}` | POST | Execute schedule now |
+
+#### Client Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/clients` | GET/POST | List/create clients |
+| `/clients/{id}` | GET/PUT/DELETE | Manage client |
+
+#### System Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (no auth) |
+| `/cluster` | GET | Cluster status |
 | `/integrations` | GET | List integrations |
-| `/plugins` | GET | List plugins |
+| `/api-keys` | GET/POST/DELETE | Manage API keys |
+| `/docs` | GET | Swagger UI (no auth) |
 
-### Documentation
-- **`/docs`** - Interactive Swagger UI
-- **`/api-docs`** - OpenAPI specification
+## 🔥 Usage Examples
 
-## 🔥 Quick Examples
-
-### 1. Execute a Playbook
+### Execute a Simple Playbook
 ```bash
-curl -X POST http://localhost:8000/playbook \
-  -H "X-API-Key: secauto-api-key-2024-07-14" \
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
   -d '{
     "playbook": [
       {"run": "data_enrichment"},
-      {"run": "virustotal_url_scanner", "urls": ["malicious.com"]}
+      {"run": "threat_analyzer"}
     ],
     "context": {
       "incident_id": "INC-001",
@@ -211,355 +300,310 @@ curl -X POST http://localhost:8000/playbook \
   }'
 ```
 
-### 2. Cache API Usage
+### Conditional Playbook Execution
 ```bash
-# Store data in cache
-curl -X POST http://localhost:8000/cache/incident-data \
-  -H "X-API-Key: secauto-api-key-2024-07-14" \
-  -H "Content-Type: application/json" \
-  -d '{"value": {"incident_id": "INC-001", "status": "active"}}'
-
-# Retrieve data from cache
-curl -X GET http://localhost:8000/cache/incident-data \
-  -H "X-API-Key: secauto-api-key-2024-07-14"
-```
-
-### 3. Job Management
-```bash
-# Get all jobs
-curl -X GET http://localhost:8000/jobs \
-  -H "X-API-Key: secauto-api-key-2024-07-14"
-
-# Get specific job status
-curl -X GET http://localhost:8000/job/job-123 \
-  -H "X-API-Key: secauto-api-key-2024-07-14"
-```
-
-### 4. HTTPS Setup (Development)
-```bash
-# Generate self-signed certificates
-cd SoarAuto
-./scripts/generate-certs.sh
-
-# Enable HTTPS in config.yaml
-# security:
-#   tls:
-#     enabled: true
-#     cert_file: "certs/server.crt"
-#     key_file: "certs/server.key"
-
-# Test HTTPS endpoint
-curl -k https://localhost:9443/health \
-  -H "X-API-Key: secauto-api-key-2024-07-14"
-```
-
-## 🏢 Multi-Tenant Client Support
-
-SecAuto supports multi-tenant operations with client-aware playbook execution, allowing secure isolation and client-specific configurations for automations and integrations.
-
-### Client-Aware Playbook Execution
-
-There are several methods to execute playbooks with client context for proper tenant isolation and client-specific configuration loading:
-
-#### 1. Client-Specific API Endpoint (Recommended)
-```bash
-# Execute playbook for specific client
-curl -X POST http://localhost:9090/clients/{client_id}/playbook \
-  -H "X-API-Key: client-specific-api-key" \
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
   -d '{
     "playbook": [
-      {"run": "threat_intel_lookup", "indicators": ["8.8.8.8", "malware.exe"]},
-      {"run": "email_notification", "severity": "high"}
-    ]
-  }'
-```
-
-**Benefits:**
-- ✅ Automatic client context injection
-- ✅ Client-specific API key authentication
-- ✅ Clear tenant isolation
-- ✅ Proper audit trails
-
-#### 2. Playbook Context Parameter
-```bash
-# Pass client_id in playbook context
-curl -X POST http://localhost:9090/playbook \
-  -H "X-API-Key: global-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "playbook": [{"run": "file_analysis", "file_path": "/tmp/suspicious.exe"}],
-    "context": {
-      "client_id": "acme_corp",
-      "incident_id": "INC-001"
-    }
-  }'
-```
-
-#### 3. Step-Level Client Context
-```bash
-# Different clients per playbook step
-curl -X POST http://localhost:9090/playbook \
-  -H "X-API-Key: api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "playbook": [
+      {"run": "virustotal_url_scanner", "url": "suspicious.com"},
       {
-        "run": "threat_intel_lookup",
-        "client_id": "customer_123",
-        "indicators": ["suspicious.com"]
-      },
-      {
-        "run": "email_notification", 
-        "client_id": "customer_456",
-        "severity": "medium"
+        "if": {
+          "conditions": [[">=", {"var": "malicious_score"}, 5]],
+          "true": {"run": "escalate_to_soc"},
+          "false": {"run": "log_as_safe"}
+        }
       }
     ]
   }'
 ```
 
-#### 4. HTTP Header Method
+### Async Job Execution
 ```bash
-# Pass client via custom header
-curl -X POST http://localhost:9090/playbook \
-  -H "X-API-Key: api-key" \
-  -H "X-Client-ID: customer_abc" \
+# Start async job
+response=$(curl -X POST http://localhost:9090/playbook/async \
+  -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
-  -d '{"playbook": [{"run": "file_analysis"}]}'
+  -d '{"playbook": [{"run": "long_running_scan"}]}')
+
+job_id=$(echo $response | jq -r '.job_id')
+
+# Check job status
+curl -X GET "http://localhost:9090/job/$job_id" \
+  -H "X-API-Key: your-api-key-here"
 ```
 
-### Client Management APIs
+### Cache API Usage
+```bash
+# Store incident data
+curl -X POST http://localhost:9090/cache/incident-INC001 \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "value": {
+      "status": "investigating",
+      "assigned_to": "soc-team",
+      "priority": "high"
+    },
+    "ttl": 3600
+  }'
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/clients` | GET | List all clients |
-| `/clients` | POST | Create new client |
-| `/clients/{id}` | GET | Get client details |
-| `/clients/{id}` | PUT | Update client |
-| `/clients/{id}` | DELETE | Delete client |
-| `/clients/{id}/integrations` | GET | List client integrations |
-| `/clients/{id}/integrations` | POST | Create client integration |
-| `/clients/{id}/integrations/{name}` | GET | Get client integration |
+# Retrieve incident data
+curl -X GET http://localhost:9090/cache/incident-INC001 \
+  -H "X-API-Key: your-api-key-here"
 
-### Client-Aware Python Integrations
-
-Python automation scripts automatically detect client context and load client-specific configurations:
-
-```python
-#!/usr/bin/env python3
-"""
-Example client-aware integration
-"""
-
-def main():
-    # Automatically detect client context
-    client_id = get_client_context()
-    
-    # Load client-specific configuration (with global fallback)
-    config = get_client_integration_config("threat_intel")
-    
-    # Use client-specific settings
-    if config:
-        api_key = config["credentials"]["virustotal_api_key"]
-        threshold = config["config"]["malicious_threshold"]
-        
-        # Perform client-specific analysis
-        result = analyze_with_client_config(api_key, threshold)
-    
-    return_context(result)
-
-if __name__ == "__main__":
-    main()
+# Delete incident data
+curl -X DELETE http://localhost:9090/cache/incident-INC001 \
+  -H "X-API-Key: your-api-key-here"
 ```
 
-### Execution Flow
+### Schedule Automation
+```bash
+curl -X POST http://localhost:9090/schedules \
+  -H "X-API-Key: your-api-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "daily-vulnerability-scan",
+    "cron": "0 2 * * *",
+    "playbook": [
+      {"run": "qualysauto"},
+      {"run": "email_notification", "template": "vuln_report"}
+    ],
+    "enabled": true
+  }'
+```
 
-1. **Request received** with client identification (URL path, context, or header)
-2. **Server extracts client_id** and validates client permissions
-3. **Isolated process created** with client-specific environment variables
-4. **Python script executes** in isolated process with client context
-5. **Client-specific config loaded** via `get_client_integration_config()`
-6. **Automation runs** with client-specific settings and credentials
+## 🏢 Multi-Tenant Support
 
-**Concurrency Safety:** Each automation runs in a separate process with isolated environment variables, preventing context bleeding between concurrent client requests.
+SecAuto provides enterprise-grade multi-tenant capabilities with complete client isolation:
 
-### Example Client-Aware Integrations
+### Client-Specific Execution
+```bash
+# Execute playbook for specific client
+curl -X POST http://localhost:9090/playbook \
+  -H "X-API-Key: your-api-key-here" \
+  -H "X-Client-ID: acme-corp" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "playbook": [{"run": "client_aware_demo"}]
+  }'
+```
 
-SecAuto includes several example integrations that demonstrate client-aware functionality:
-
-- **`threat_intel_lookup.py`** - Client-specific threat intelligence APIs and scoring
-- **`email_notification.py`** - Client-specific SMTP settings and templates  
-- **`file_analysis.py`** - Client-specific sandbox environments and policies
-
-### Client Isolation Features
-
-- **🔐 Separate API Keys**: Each client has unique authentication credentials
-- **📁 Isolated Storage**: Client-specific directories for configs and data
-- **⚙️ Custom Settings**: Per-client thresholds, templates, and policies
-- **🔄 Fallback Support**: Automatic fallback to global configurations
-- **📊 Audit Trails**: Complete client-specific logging and tracking
-
-## 📚 Documentation
-
-### Comprehensive Guides
-- **[Cache API Documentation](SoarAuto/READMES/CACHE_API_README.md)** - Complete Redis cache API guide
-- **[HTTPS Setup Guide](SoarAuto/READMES/HTTPS_SETUP_README.md)** - TLS/SSL configuration and certificates
-- **[Plugin Development](SoarAuto/READMES/PLUGIN_SYSTEM_DEVELOPEMENT_README.md)** - Building custom plugins
-- **[Integration Development](SoarAuto/READMES/CONFIG_FILE_INTEGRATION.md)** - Creating integrations
-- **[Distributed System](SoarAuto/READMES/DISTRIBUTED_SYSTEM_README.md)** - Multi-node deployment
-- **[Docker Deployment](SoarAuto/READMES/README_DOCKER.md)** - Container deployment guide
-
-### API Documentation
-- **Interactive Docs**: Visit `http://localhost:8000/docs` when running
-- **OpenAPI Spec**: Available at `http://localhost:8000/api-docs`
-
-## 🔌 Integrations
-
-SecAuto supports a wide range of security tool integrations:
-
-### Threat Intelligence
-- **VirusTotal** - URL/file scanning and reputation checks
-- **Qualys** - Vulnerability management and scanning
-- **Custom APIs** - Extensible integration framework
-
-### Communication & Notifications
-- **Webhooks** - Real-time event notifications
-- **Custom Integrations** - Build your own integration modules
-
-### Data Storage & Caching
-- **Redis** - High-performance caching and job storage
-- **File System** - Local storage for automations and playbooks
+### Features
+- **🔐 Isolated Credentials**: Per-client API keys and secrets
+- **📁 Separate Storage**: Client-specific data directories
+- **⚙️ Custom Configuration**: Per-client thresholds and policies
+- **🔄 Automatic Fallback**: Global config when client-specific unavailable
+- **📊 Audit Trails**: Complete per-client activity logging
 
 ## 🛠️ Development
 
-### Project Structure
-```
-SecAuto/
-├── SoarAuto/                 # Go server source
-│   ├── main.go              # Main application entry
-│   ├── config.yaml          # Configuration file
-│   ├── redis_integration.go # Cache API implementation
-│   ├── rules_engine.go      # Playbook execution engine
-│   └── READMES/             # Documentation
-├── automations/             # Python automation scripts
-├── integrations/            # Integration modules
-├── playbooks/              # JSON playbook definitions
-├── plugins/                # Plugin system
-└── Venv/                   # Python virtual environment
-```
+### Creating Custom Automations
 
-### Adding New Features
-
-1. **Create Automation Scripts**
+#### Python Automation Template
 ```python
-# automations/my_automation.py
+#!/usr/bin/env python3
 import json
 import sys
+from server.SoarBaseAPI import load_context, return_context
 
 def main():
-    context = json.loads(sys.argv[1])
+    # Load context from SecAuto
+    context = load_context()
+    if not context and len(sys.argv) > 1:
+        context = json.loads(sys.argv[1])
     
-    # Your automation logic here
-    result = {"processed": True, "data": context}
+    # Your automation logic
+    result = process_security_event(context)
     
-    print(json.dumps(result))
+    # Return results to SecAuto
+    return_context(result)
+
+def process_security_event(context):
+    # Implementation here
+    return {"success": True, "data": processed_data}
 
 if __name__ == "__main__":
     main()
 ```
 
-2. **Create Playbooks**
+#### Playbook Definition
 ```json
 [
-  {"run": "data_enrichment"},
-  {"run": "my_automation"},
+  {
+    "run": "data_enrichment",
+    "timeout": 30
+  },
+  {
+    "parallel": [
+      {"run": "virustotal_scan"},
+      {"run": "threat_intel_lookup"}
+    ]
+  },
   {
     "if": {
-      "conditions": [["==", {"var": "severity"}, "high"]],
-      "true": {"run": "escalate_incident"},
-      "false": {"run": "log_incident"}
+      "conditions": [["==", {"var": "threat_level"}, "critical"]],
+      "true": {
+        "sequential": [
+          {"run": "isolate_host"},
+          {"run": "notify_soc"},
+          {"cache": {"key": "critical_incident", "value": {"var": "incident_data"}}}
+        ]
+      },
+      "false": {"run": "log_event"}
     }
   }
 ]
 ```
 
-3. **Add Integrations**
-```python
-# integrations/my_service_integration.py
-class MyServiceIntegration:
-    def __init__(self, config_name="my_service"):
-        # Integration initialization
-        pass
-    
-    def query_api(self, query):
-        # API interaction logic
-        return {"success": True, "data": []}
+### Project Structure
+```
+SecAuto/
+├── SoarAuto/                    # Go server application
+│   ├── main.go                  # Main entry point & API handlers
+│   ├── config.yaml              # Configuration file
+│   ├── pkg/                     # Go packages
+│   │   ├── auth/               # Authentication system
+│   │   ├── automations/        # Automation management
+│   │   ├── cache/              # Cache implementation
+│   │   ├── clients/            # Client management
+│   │   ├── cluster/            # Clustering support
+│   │   ├── config/             # Configuration management
+│   │   ├── errors/             # Error handling
+│   │   ├── integrations/       # Integration framework
+│   │   ├── jobs/               # Job management
+│   │   ├── logger/             # Logging system
+│   │   ├── performance/        # Performance utilities
+│   │   ├── playbooks/          # Playbook management
+│   │   ├── recovery/           # Panic recovery
+│   │   ├── redis/              # Redis client
+│   │   ├── rules/              # Rules engine
+│   │   ├── schedules/          # Scheduling system
+│   │   ├── security/           # Security middleware
+│   │   ├── swagger/            # API documentation
+│   │   ├── tls/                # TLS configuration
+│   │   ├── types/              # Type definitions
+│   │   └── validator/          # Input validation
+│   └── data/                    # Runtime data
+├── automations/                 # Python automation scripts
+│   ├── client_virustotal_scanner.py
+│   ├── data_enrichment.py
+│   ├── email_notification.py
+│   ├── threat_analyzer.py
+│   └── ...
+├── playbooks/                   # JSON playbook definitions
+├── integrations/                # Integration modules
+├── plugins/                     # Plugin system
+│   ├── go/                     # Go plugins
+│   ├── python/                  # Python plugins
+│   ├── windows/                 # Windows-specific
+│   └── linux/                   # Linux-specific
+├── server/                      # Python support libraries
+│   └── SoarBaseAPI.py          # Helper functions
+├── logs/                        # Application logs
+├── Venv/                        # Python virtual environment
+└── CLAUDE.md                    # AI assistant instructions
 ```
 
-## 🔒 Security
+## 🔒 Security Features
 
-- **API Key Authentication**: Required for all endpoints
-- **HTTPS/TLS Support**: SSL/TLS encryption with automatic certificates
-- **Rate Limiting**: Configurable per-endpoint rate limits
+### Authentication & Authorization
+- **API Key Management**: Secure key generation and rotation
+- **Client Certificates**: Mutual TLS authentication
+- **Role-Based Access**: Granular permission system
+
+### Network Security
+- **TLS/HTTPS**: Full encryption with TLS 1.2+
+- **Rate Limiting**: DDoS protection and API throttling
+- **CORS Protection**: Configurable origin policies
+- **Security Headers**: HSTS, CSP, X-Frame-Options
+
+### Data Protection
 - **Input Validation**: Comprehensive request validation
-- **CORS Protection**: Configurable cross-origin policies
-- **Client Certificate Auth**: Mutual TLS authentication support
-- **Secure Headers**: Security-focused HTTP headers
+- **Secure Storage**: Encrypted sensitive data
+- **Audit Logging**: Complete activity tracking
 
-## 📊 Monitoring
+## 📊 Monitoring & Observability
 
 ### Logging
-- **Structured Logging**: JSON-formatted logs with context
-- **Log Rotation**: Automatic log file rotation
-- **Multiple Levels**: Debug, Info, Warning, Error levels
+- JSON structured logging
+- Component-level log filtering
+- Automatic log rotation and compression
+- Centralized log aggregation support
 
 ### Metrics
-- **Job Metrics**: Execution times, success rates, error tracking
-- **Performance Monitoring**: Response times, throughput monitoring
-- **Health Checks**: System health and dependency status
+- Job execution metrics
+- API response times
+- Cache hit/miss rates
+- Error tracking and alerting
+
+### Health Monitoring
+- `/health` endpoint for liveness checks
+- Dependency health verification
+- Cluster node status tracking
 
 ## 🚀 Production Deployment
 
 ### Docker Deployment
 ```bash
-# Build container
-docker build -t secauto .
+# Build Docker image
+docker build -t secauto:latest .
 
-# Run with Redis
+# Run with Docker Compose
 docker-compose up -d
 ```
 
-### Distributed Deployment
+### Kubernetes Deployment
 ```yaml
-# Multiple nodes with shared Redis
-cluster:
-  enabled: true
-  node_id: "node-1"
-  redis_url: "redis://redis-cluster:6379/0"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secauto
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: secauto
+  template:
+    metadata:
+      labels:
+        app: secauto
+    spec:
+      containers:
+      - name: secauto
+        image: secauto:latest
+        ports:
+        - containerPort: 9090
+        env:
+        - name: REDIS_URL
+          value: "redis://redis-service:6379"
 ```
 
-### Load Balancing
-```nginx
-upstream secauto {
-    server 127.0.0.1:8000;
-    server 127.0.0.1:8001;
-    server 127.0.0.1:8002;
-}
-```
+### High Availability Setup
+- Multiple SecAuto nodes
+- Redis Sentinel for failover
+- Load balancer configuration
+- Shared storage for plugins/automations
+
+## 📚 Documentation
+
+- **[API Documentation](http://localhost:9090/docs)** - Interactive Swagger UI
+- **[CLAUDE.md](CLAUDE.md)** - Development guide for AI assistants
+- **[Cache API Guide](SoarAuto/READMES/CACHE_API_README.md)** - Redis cache usage
+- **[HTTPS Setup](SoarAuto/READMES/HTTPS_SETUP_README.md)** - TLS configuration
+- **[Plugin Development](SoarAuto/READMES/PLUGIN_SYSTEM_DEVELOPEMENT_README.md)** - Creating plugins
+- **[Distributed Systems](SoarAuto/READMES/DISTRIBUTED_SYSTEM_README.md)** - Clustering guide
 
 ## 🤝 Contributing
 
-1. **Fork the Repository**
-2. **Create Feature Branch** (`git checkout -b feature/amazing-feature`)
-3. **Commit Changes** (`git commit -m 'Add amazing feature'`)
-4. **Push to Branch** (`git push origin feature/amazing-feature`)
-5. **Open Pull Request**
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
-### Development Guidelines
-- Follow Go best practices and idioms
-- Include comprehensive tests
-- Update documentation for new features
-- Ensure backward compatibility
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📄 License
 
@@ -567,18 +611,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- **Go Community** - For excellent libraries and tools
-- **Redis Team** - For high-performance data storage
-- **Security Community** - For inspiration and best practices
+- Go community for excellent libraries and tools
+- Redis team for high-performance data storage
+- Python community for automation capabilities
+- Security community for best practices and inspiration
 
 ## 📞 Support
 
-- **Documentation**: Check the `/docs` endpoint when running
-- **Issues**: Use GitHub Issues for bug reports
-- **Community**: Join our discussion forums
+- **Documentation**: Check `/docs` endpoint when running
+- **Issues**: [GitHub Issues](https://github.com/your-org/secauto/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/secauto/discussions)
+- **Security**: Report vulnerabilities to security@your-org.com
 
 ---
 
-**Built with ❤️ for the cybersecurity community**
+**Built with ❤️ for the Cybersecurity Community**
 
 *SecAuto - Automate Today, Secure Tomorrow*

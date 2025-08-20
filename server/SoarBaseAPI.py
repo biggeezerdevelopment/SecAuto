@@ -367,4 +367,66 @@ def get_client_integration_config(integration_name: str) -> dict:
     """
     client_id = get_client_context()
     return get_integration_config(integration_name, client_id)
+
+# Integration function support
+def use_integration(integration_name: str, function_name: str, **kwargs):
+    """
+    Call an integration function with automatic dependency loading
+    
+    Args:
+        integration_name: Name of the integration
+        function_name: Name of the function to call
+        **kwargs: Arguments to pass to the function
+        
+    Returns:
+        Function result or error dictionary
+        
+    Example:
+        from server.SoarBaseAPI import use_integration
+        result = use_integration('qualys', 'scan_hosts', hosts=['10.0.0.1'])
+    """
+    try:
+        from server.integration_loader import use_integration as _use_integration
+        return _use_integration(integration_name, function_name, **kwargs)
+    except ImportError:
+        # Fallback if integration_loader not available
+        return {
+            "success": False,
+            "error": "Integration loader not available"
+        }
+
+def list_integration_functions(integration_name: str):
+    """
+    List available functions in an integration
+    
+    Args:
+        integration_name: Name of the integration
+        
+    Returns:
+        Dictionary with function names and signatures
+    """
+    try:
+        from server.integration_loader import list_integration_functions as _list_funcs
+        return _list_funcs(integration_name)
+    except ImportError:
+        return {
+            "success": False,
+            "error": "Integration loader not available"
+        }
+
+def check_integration_available(integration_name: str) -> bool:
+    """
+    Check if an integration is available and built
+    
+    Args:
+        integration_name: Name of the integration
+        
+    Returns:
+        True if integration is available, False otherwise
+    """
+    try:
+        from server.integration_loader import check_integration_available as _check_avail
+        return _check_avail(integration_name)
+    except ImportError:
+        return False
     

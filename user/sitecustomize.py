@@ -94,6 +94,9 @@ def check_and_reload():
     """Check if SoarBaseAPI.py has been modified and reload if needed"""
     global last_modified_time
     
+    # Define the path to SoarBaseAPI.py
+    soar_api_path = Path(server_path) / "SoarBaseAPI.py"
+    
     if not soar_api_path.exists():
         return
     
@@ -151,6 +154,90 @@ try:
     builtins.context = global_context
     builtins.secauto_url = secauto_url
     builtins.secauto_api_key = secauto_api_key
-    _log_message(f"Warning: Could not import SoarBaseAPI from {server_path}: {e}")
 except ImportError as e:
     _log_message(f"Warning: Could not import SoarBaseAPI from {server_path}: {e}")
+
+# Integration Backend Loader - Dynamic integration package loading
+def load_integration_packages():
+    """Dynamically load integration-specific packages based on context"""
+    
+    # Check for integration context via environment variable
+    integration = os.environ.get('SECAUTO_INTEGRATION')
+    
+    if not integration:
+        # Check for PID-specific context file (fallback)
+        pid_file = f'/tmp/secauto_{os.getpid()}.integration'
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, 'r') as f:
+                    integration = f.read().strip()
+                # Clean up the file after reading
+                os.remove(pid_file)
+            except:
+                pass
+    
+    if integration:
+        # Get the base path for integrations
+        # This script is in Venv/lib/python3.9/site-packages/
+        venv_path = Path(__file__).parent.parent.parent.parent  # Up to Venv/
+        base_path = venv_path.parent  # SecAuto directory
+        integrations_base = base_path / "integrations" / ".site-packages"
+        integration_path = integrations_base / integration
+        
+        # Add integration-specific site-packages to path if it exists
+        if integration_path.exists() and str(integration_path) not in sys.path:
+            sys.path.insert(0, str(integration_path))
+            
+            # Also check for build status to get all registered paths
+            build_status_file = integrations_base.parent / ".build_status.json"
+            if build_status_file.exists():
+                try:
+                    import json
+                    with open(build_status_file, 'r') as f:
+                        status = json.load(f)
+                        if integration in status:
+                            site_packages = status[integration].get('site_packages')
+                            if site_packages and os.path.exists(site_packages):
+                                if site_packages not in sys.path:
+                                    sys.path.insert(0, site_packages)
+                except:
+                    pass
+    
+    # Also check for general integration paths from .pth files
+    # This allows integrations to work even without SECAUTO_INTEGRATION set
+    try:
+        site_packages_dir = Path(__file__).parent
+        for pth_file in site_packages_dir.glob("integration_*.pth"):
+            try:
+                with open(pth_file, 'r') as f:
+                    path = f.read().strip()
+                    if path and os.path.exists(path) and path not in sys.path:
+                        # Add at the end for lower priority than specific integration
+                        sys.path.append(path)
+            except:
+                pass
+    except:
+        pass
+
+# Load integration packages on startup
+try:
+    load_integration_packages()
+    
+    # Add integration functions to builtins if available
+    try:
+        import builtins
+        if hasattr(SoarBaseAPI, 'use_integration'):
+            builtins.use_integration = SoarBaseAPI.use_integration
+        if hasattr(SoarBaseAPI, 'list_integration_functions'):
+            builtins.list_integration_functions = SoarBaseAPI.list_integration_functions
+        if hasattr(SoarBaseAPI, 'check_integration_available'):
+            builtins.check_integration_available = SoarBaseAPI.check_integration_available
+    except:
+        pass
+        
+except Exception:
+    # Fail silently to not break Python startup
+    pass
+
+# Set a flag to indicate integration loader has been added
+os.environ['SECAUTO_INTEGRATION_LOADER'] = '1'

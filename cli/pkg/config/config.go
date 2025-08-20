@@ -15,7 +15,7 @@ type Config struct {
 	Output     string            `mapstructure:"output"`
 	NoColor    bool              `mapstructure:"no_color"`
 	Verbose    bool              `mapstructure:"verbose"`
-	Profiles   map[string]Profile `mapstructure:"profiles"`
+	Profiles   map[string]*Profile `mapstructure:"profiles"`
 	Current    string            `mapstructure:"current"`
 }
 
@@ -34,7 +34,7 @@ func LoadConfig() (*Config, error) {
 		Output:  "table",
 		NoColor: false,
 		Verbose: false,
-		Profiles: make(map[string]Profile),
+		Profiles: make(map[string]*Profile),
 		Current: "default",
 	}
 
@@ -58,10 +58,10 @@ func LoadConfig() (*Config, error) {
 	// Load profiles from config file
 	if viper.IsSet("profiles") {
 		profilesData := viper.GetStringMap("profiles")
-		config.Profiles = make(map[string]Profile)
+		config.Profiles = make(map[string]*Profile)
 		for name, data := range profilesData {
 			if profileMap, ok := data.(map[string]interface{}); ok {
-				profile := Profile{}
+				profile := &Profile{}
 				if server, exists := profileMap["server"]; exists {
 					if serverStr, ok := server.(string); ok {
 						profile.Server = serverStr
@@ -125,15 +125,15 @@ func (c *Config) Save() error {
 }
 
 // GetCurrentProfile returns the current active profile
-func (c *Config) GetCurrentProfile() (Profile, bool) {
+func (c *Config) GetCurrentProfile() (*Profile, bool) {
 	profile, exists := c.Profiles[c.Current]
 	return profile, exists
 }
 
 // AddProfile adds a new profile
-func (c *Config) AddProfile(name string, profile Profile) {
+func (c *Config) AddProfile(name string, profile *Profile) {
 	if c.Profiles == nil {
-		c.Profiles = make(map[string]Profile)
+		c.Profiles = make(map[string]*Profile)
 	}
 	profile.Name = name
 	c.Profiles[name] = profile

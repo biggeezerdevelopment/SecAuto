@@ -43,11 +43,20 @@ var jobWatchCmd = &cobra.Command{
 	RunE:  watchJobCmd,
 }
 
+// jobStatsCmd represents the job stats command
+var jobStatsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Show job statistics",
+	Long:  `Show statistics for job execution including counts by status.`,
+	RunE:  getJobStats,
+}
+
 func init() {
 	rootCmd.AddCommand(jobCmd)
 	jobCmd.AddCommand(jobListCmd)
 	jobCmd.AddCommand(jobGetCmd)
 	jobCmd.AddCommand(jobWatchCmd)
+	jobCmd.AddCommand(jobStatsCmd)
 
 	// Job list flags
 	jobListCmd.Flags().String("status", "", "Filter jobs by status (pending, running, completed, failed)")
@@ -279,6 +288,34 @@ func watchJobCmd(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+}
+
+func getJobStats(cmd *cobra.Command, args []string) error {
+	config := GetGlobalConfig()
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %v", err)
+	}
+
+	printer := output.NewPrinter(config.Output, config.NoColor)
+	apiClient := client.NewClient(config.Server, config.APIKey)
+
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	if !printer.NoColor {
+		s.Start()
+		s.Suffix = " Fetching job statistics..."
+	}
+
+	stats, err := apiClient.GetJobStats()
+
+	if !printer.NoColor {
+		s.Stop()
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to get job stats: %v", err)
+	}
+
+	return printer.Print(stats)
 }
 
 // Helper function to format time pointer for display

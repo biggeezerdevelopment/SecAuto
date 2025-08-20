@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/briandowns/spinner"
@@ -56,6 +57,30 @@ var automationListCmd = &cobra.Command{
 	RunE:  listAutomations,
 }
 
+// automationUploadCmd represents the automation upload command
+var automationUploadCmd = &cobra.Command{
+	Use:   "upload <file>",
+	Short: "Upload an automation script",
+	Long: `Upload a Python automation script to the SecAuto server.
+	
+Examples:
+  secauto automation upload my_automation.py`,
+	Args: cobra.ExactArgs(1),
+	RunE: uploadAutomation,
+}
+
+// automationDeleteCmd represents the automation delete command
+var automationDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete an automation script",
+	Long: `Delete an automation script from the SecAuto server.
+	
+Examples:
+  secauto automation delete my_automation`,
+	Args: cobra.ExactArgs(1),
+	RunE: deleteAutomation,
+}
+
 func init() {
 	rootCmd.AddCommand(integrationCmd)
 	rootCmd.AddCommand(automationCmd)
@@ -64,6 +89,8 @@ func init() {
 	integrationCmd.AddCommand(integrationExecuteCmd)
 	
 	automationCmd.AddCommand(automationListCmd)
+	automationCmd.AddCommand(automationUploadCmd)
+	automationCmd.AddCommand(automationDeleteCmd)
 
 	// Integration execute flags
 	integrationExecuteCmd.Flags().String("params", "", "Parameters as JSON string")
@@ -226,4 +253,84 @@ func listAutomations(cmd *cobra.Command, args []string) error {
 	}
 
 	return printer.Print(data)
+}
+
+func uploadAutomation(cmd *cobra.Command, args []string) error {
+	config := GetGlobalConfig()
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %v", err)
+	}
+
+	printer := output.NewPrinter(config.Output, config.NoColor)
+	apiClient := client.NewClient(config.Server, config.APIKey)
+
+	automationFile := args[0]
+
+	// Read file content
+	file, err := os.Open(automationFile)
+	if err != nil {
+		return fmt.Errorf("failed to open automation file: %v", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("failed to read automation file: %v", err)
+	}
+
+	// Get the base filename
+	filename := automationFile
+	if idx := strings.LastIndex(automationFile, "/"); idx != -1 {
+		filename = automationFile[idx+1:]
+	}
+
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	if !printer.NoColor {
+		s.Start()
+		s.Suffix = " Uploading automation..."
+	}
+
+	err = apiClient.UploadAutomation(filename, content)
+	
+	if !printer.NoColor {
+		s.Stop()
+	}
+
+	if err != nil {
+		return fmt.Errorf("upload failed: %v", err)
+	}
+
+	printer.PrintSuccess(fmt.Sprintf("Automation '%s' uploaded successfully", automationFile))
+	return nil
+}
+
+func deleteAutomation(cmd *cobra.Command, args []string) error {
+	config := GetGlobalConfig()
+	if err := config.Validate(); err != nil {
+		return fmt.Errorf("configuration error: %v", err)
+	}
+
+	printer := output.NewPrinter(config.Output, config.NoColor)
+	apiClient := client.NewClient(config.Server, config.APIKey)
+
+	automationName := args[0]
+
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	if !printer.NoColor {
+		s.Start()
+		s.Suffix = " Deleting automation..."
+	}
+
+	err := apiClient.DeleteAutomation(automationName)
+	
+	if !printer.NoColor {
+		s.Stop()
+	}
+
+	if err != nil {
+		return fmt.Errorf("delete failed: %v", err)
+	}
+
+	printer.PrintSuccess(fmt.Sprintf("Automation '%s' deleted successfully", automationName))
+	return nil
 }

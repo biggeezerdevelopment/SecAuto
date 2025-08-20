@@ -99,6 +99,9 @@ secauto job get <job-id>
 
 # Watch a job until completion
 secauto job watch <job-id>
+
+# Show job statistics
+secauto job stats
 ```
 
 ### Cache Commands
@@ -134,9 +137,59 @@ secauto integration execute virustotal --params '{"url": "https://example.com"}'
 
 # Execute with parameters from file
 secauto integration execute qualys --params-file params.json
+```
 
+### Automation Commands
+
+```bash
 # List automations
 secauto automation list
+
+# Upload an automation script
+secauto automation upload my_automation.py
+
+# Delete an automation script
+secauto automation delete my_automation
+```
+
+### Client Management Commands
+
+```bash
+# List all clients
+secauto client list
+
+# Get client details
+secauto client get <client-id>
+
+# Delete a client
+secauto client delete <client-id>
+```
+
+### API Key Management Commands
+
+```bash
+# List all API keys
+secauto apikey list
+
+# Create a new API key
+secauto apikey create [name] --description "My API key"
+
+# Delete an API key
+secauto apikey delete <key-id>
+
+# Show API key usage statistics
+secauto apikey stats
+```
+
+### Batch Operations
+
+```bash
+# Execute multiple playbooks from a directory
+secauto batch playbook ./playbooks/ --async --max-concurrent 5
+
+# Upload multiple files from a directory
+secauto batch upload ./playbooks/ --type playbook
+secauto batch upload ./automations/ --type automation
 ```
 
 ### Cluster Commands

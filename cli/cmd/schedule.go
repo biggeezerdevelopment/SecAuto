@@ -387,7 +387,7 @@ func updateSchedule(cmd *cobra.Command, args []string) error {
 		s.Suffix = " Updating schedule..."
 	}
 
-	updatedSchedule, err := apiClient.UpdateSchedule(scheduleID, updates)
+	err := apiClient.UpdateSchedule(scheduleID, updates)
 
 	if !printer.NoColor {
 		s.Stop()
@@ -398,17 +398,6 @@ func updateSchedule(cmd *cobra.Command, args []string) error {
 	}
 
 	printer.Success(fmt.Sprintf("Schedule updated successfully: %s", scheduleID))
-
-	// Display updated schedule
-	switch config.Output {
-	case "json":
-		data, _ := json.MarshalIndent(updatedSchedule, "", "  ")
-		fmt.Println(string(data))
-	case "yaml":
-		printer.PrintYAML(updatedSchedule)
-	default:
-		printer.PrintScheduleDetails(updatedSchedule)
-	}
 
 	return nil
 }

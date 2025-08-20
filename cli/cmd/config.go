@@ -232,7 +232,7 @@ func configProfileAdd(cmd *cobra.Command, args []string) error {
 		Description: description,
 	}
 
-	cfg.AddProfile(name, profile)
+	cfg.AddProfile(name, &profile)
 	
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("failed to save configuration: %v", err)

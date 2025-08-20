@@ -106,9 +106,12 @@ func (p *Printer) printGenericTable(data []map[string]interface{}) error {
 	table.SetCenterSeparator("|")
 
 	if !p.NoColor {
-		table.SetHeaderColor(
-			tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
-		)
+		// Create color for each header column
+		headerColors := make([]tablewriter.Colors, len(headerSlice))
+		for i := range headerColors {
+			headerColors[i] = tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor}
+		}
+		table.SetHeaderColor(headerColors...)
 	}
 
 	for _, row := range data {
