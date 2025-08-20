@@ -13,7 +13,6 @@
 ### Core Capabilities
 - **🎭 Advanced Playbook Engine**: JSON-based workflow automation with conditional logic, loops, and parallel execution
 - **🐍 Python Automation Framework**: Extensible Python scripts with built-in helper libraries
-- **🔌 Multi-Platform Plugin System**: Support for Go, Python, Windows, and Linux plugins
 - **⚡ High-Performance Caching**: Redis-based cache API with TTL and lazy evaluation
 - **🌐 Distributed Architecture**: Multi-node clustering with Redis coordination
 - **📊 Comprehensive Job Management**: Async execution, persistence, retry logic, and monitoring
@@ -206,11 +205,6 @@ logging:
     rules_engine: "WARNING"
     redis_integration: "ERROR"
     job_manager: "INFO"
-
-# Plugin System
-plugins:
-  enabled: true
-  directory: "../plugins"
 ```
 
 ## 🎯 API Reference
@@ -566,21 +560,14 @@ jobStatus, err := client.GetJobStatus(context.Background(), jobID)
     "run": "data_enrichment",
     "timeout": 30
   },
-  {
-    "parallel": [
-      {"run": "virustotal_scan"},
-      {"run": "threat_intel_lookup"}
-    ]
-  },
+  {"run": "virustotal_scan"},
+  {"run": "threat_intel_lookup"},
   {
     "if": {
       "conditions": [["==", {"var": "threat_level"}, "critical"]],
       "true": {
-        "sequential": [
           {"run": "isolate_host"},
           {"run": "notify_soc"},
-          {"cache": {"key": "critical_incident", "value": {"var": "incident_data"}}}
-        ]
       },
       "false": {"run": "log_event"}
     }
@@ -729,7 +716,6 @@ spec:
 ## 📚 Documentation
 
 - **[API Documentation](http://localhost:9090/docs)** - Interactive Swagger UI
-- **[CLAUDE.md](CLAUDE.md)** - Development guide for AI assistants
 - **[Cache API Guide](SoarAuto/READMES/CACHE_API_README.md)** - Redis cache usage
 - **[HTTPS Setup](SoarAuto/READMES/HTTPS_SETUP_README.md)** - TLS configuration
 - **[Plugin Development](SoarAuto/READMES/PLUGIN_SYSTEM_DEVELOPEMENT_README.md)** - Creating plugins
@@ -761,11 +747,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Documentation**: Check `/docs` endpoint when running SecAuto
 - **Interactive API**: Swagger UI available at `http://localhost:9090/docs`
 - **Health Check**: Monitor system status at `http://localhost:9090/health`
-- **Configuration**: See `CLAUDE.md` for detailed setup and development guidance
 - **Security**: Follow security best practices outlined in `SoarAuto/security/README.md`
 
 ---
 
 **Built with ❤️ for the Cybersecurity Community**
-
-*SecAuto - Automate Today, Secure Tomorrow*
