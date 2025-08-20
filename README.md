@@ -281,6 +281,68 @@ curl -H "X-API-Key: your-api-key-here" http://localhost:9090/endpoint
 | `/api-keys` | GET/POST/DELETE | Manage API keys |
 | `/docs` | GET | Swagger UI (no auth) |
 
+## 🛠️ Command-Line Interface
+
+SecAuto includes a comprehensive CLI tool for management and automation:
+
+### Build and Install CLI
+```bash
+cd cli
+go mod tidy
+go build -o secauto-cli .        # Standard CLI
+go build -o secauto-ishell .     # Interactive shell
+
+# Install locally
+./install-local.sh
+```
+
+### CLI Commands
+```bash
+# Health and status
+secauto-cli health --server http://localhost:9090
+secauto-cli cluster status
+
+# Playbook management
+secauto-cli playbook run --file example.json
+secauto-cli playbook list
+secauto-cli playbook upload --file my-playbook.json
+
+# Job management
+secauto-cli job list --status running
+secauto-cli job get --id job-12345
+secauto-cli job cancel --id job-12345
+
+# Cache operations
+secauto-cli cache get incident-001
+secauto-cli cache set incident-001 '{"status":"resolved"}'
+secauto-cli cache clear
+
+# Client management
+secauto-cli client list
+secauto-cli client create --name "acme-corp"
+
+# Integration management
+secauto-cli integration list
+secauto-cli integration run --name virustotal --args '{"url":"example.com"}'
+
+# Schedule management
+secauto-cli schedule list
+secauto-cli schedule create --name daily-scan --cron "0 2 * * *"
+```
+
+### Interactive Shell
+```bash
+# Start interactive shell
+./secauto-ishell
+
+# Commands available in shell:
+SecAuto> help
+SecAuto> health
+SecAuto> playbook run example.json
+SecAuto> cache stats
+SecAuto> exit
+```
+
 ## 🔥 Usage Examples
 
 ### Execute a Simple Playbook
@@ -397,6 +459,50 @@ curl -X POST http://localhost:9090/playbook \
 - **🔄 Automatic Fallback**: Global config when client-specific unavailable
 - **📊 Audit Trails**: Complete per-client activity logging
 
+## 🧪 Testing Framework
+
+SecAuto includes comprehensive testing capabilities:
+
+### Test Structure
+```
+SoarAuto/
+├── tests/
+│   ├── e2e/                     # End-to-end API tests
+│   ├── integration/             # Integration tests with Redis
+│   └── load/                    # Load testing utilities
+├── testdata/                    # Test configurations
+│   ├── configs/
+│   └── playbooks/
+└── pkg/*/                       # Unit tests alongside packages
+    └── *_test.go
+```
+
+### Running Tests
+```bash
+# Unit tests
+cd SoarAuto
+go test ./...
+
+# Integration tests
+go test ./tests/integration/...
+
+# E2E tests (requires running server)
+go test ./tests/e2e/...
+
+# Test coverage
+go test -cover ./...
+
+# Benchmark tests
+go test -bench=. ./pkg/performance/...
+```
+
+### Test Utilities
+The `pkg/testutil/testutil.go` package provides:
+- Mock Redis client
+- Test configuration helpers
+- HTTP test utilities
+- Context creation helpers
+
 ## 🛠️ Development
 
 ### Creating Custom Automations
@@ -426,6 +532,31 @@ def process_security_event(context):
 
 if __name__ == "__main__":
     main()
+```
+
+### Go SDK
+
+SecAuto provides a Go SDK for programmatic integration:
+
+```go
+// sec-sdk/secauto-sdk.go
+import "path/to/secauto-sdk"
+
+client := secauto.NewClient("http://localhost:9090", "your-api-key")
+
+// Execute playbook
+result, err := client.ExecutePlaybook(context.Background(), playbook, contextData)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Manage jobs
+jobID, err := client.ExecutePlaybookAsync(context.Background(), playbook, contextData)
+if err != nil {
+    log.Fatal(err)
+}
+
+jobStatus, err := client.GetJobStatus(context.Background(), jobID)
 ```
 
 #### Playbook Definition
@@ -499,11 +630,14 @@ SecAuto/
 │   ├── python/                  # Python plugins
 │   ├── windows/                 # Windows-specific
 │   └── linux/                   # Linux-specific
-├── server/                      # Python support libraries
-│   └── SoarBaseAPI.py          # Helper functions
-├── logs/                        # Application logs
-├── Venv/                        # Python virtual environment
-└── CLAUDE.md                    # AI assistant instructions
+├── server/                     # Python support libraries
+│   ├── SoarBaseAPI.py         # Helper functions for automations
+│   └── integration_loader.py  # Integration loading utilities
+├── scripts/                    # Build and utility scripts
+├── sec-sdk/                    # Go SDK for SecAuto
+├── logs/                       # Application logs
+├── Venv/                       # Python virtual environment
+└── CLAUDE.md                   # AI assistant instructions
 ```
 
 ## 🔒 Security Features
@@ -547,11 +681,17 @@ SecAuto/
 
 ### Docker Deployment
 ```bash
+# Navigate to Docker directory
+cd SoarAuto/docker
+
 # Build Docker image
 docker build -t secauto:latest .
 
 # Run with Docker Compose
 docker-compose up -d
+
+# Or build from root with provided Dockerfile
+docker build -f SoarAuto/docker/Dockerfile -t secauto:latest .
 ```
 
 ### Kubernetes Deployment
@@ -618,10 +758,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Documentation**: Check `/docs` endpoint when running
-- **Issues**: [GitHub Issues](https://github.com/your-org/secauto/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/secauto/discussions)
-- **Security**: Report vulnerabilities to security@your-org.com
+- **Documentation**: Check `/docs` endpoint when running SecAuto
+- **Interactive API**: Swagger UI available at `http://localhost:9090/docs`
+- **Health Check**: Monitor system status at `http://localhost:9090/health`
+- **Configuration**: See `CLAUDE.md` for detailed setup and development guidance
+- **Security**: Follow security best practices outlined in `SoarAuto/security/README.md`
 
 ---
 
