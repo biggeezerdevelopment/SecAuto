@@ -1,0 +1,150 @@
+{
+  "name": "postgresql",
+  "version": "1.0.0",
+  "description": "PostgreSQL database integration for listing and querying data",
+  "author": "SecAuto",
+  "dependencies": {
+    "packages": [
+      "psycopg2-binary==2.9.9",
+      "urllib3==2.0"
+    ],
+    "system": [],
+    "optional": []
+  },
+  "backend": {
+    "type": "python",
+    "entry_point": "postgresql_integration.py",
+    "timeout": 30,
+    "memory_limit": 512,
+    "requires_build": true
+  },
+  "configuration": {
+    "host": {
+      "type": "string",
+      "required": true,
+      "description": "PostgreSQL server hostname or IP",
+      "example": "localhost"
+    },
+    "port": {
+      "type": "number",
+      "required": false,
+      "description": "PostgreSQL server port",
+      "default": 5432
+    },
+    "database": {
+      "type": "string",
+      "required": true,
+      "description": "Database name",
+      "example": "mydb"
+    },
+    "username": {
+      "type": "string",
+      "required": true,
+      "description": "Database username",
+      "example": "postgres"
+    },
+    "password": {
+      "type": "string",
+      "required": true,
+      "description": "Database password",
+      "encrypted": true
+    },
+    "ssl_mode": {
+      "type": "string",
+      "required": false,
+      "description": "SSL connection mode",
+      "default": "prefer",
+      "example": "require"
+    }
+  },
+  "functions": {
+    "list_tables": {
+      "description": "List all tables in the database",
+      "parameters": {
+        "schema": {
+          "type": "string",
+          "required": false,
+          "description": "Schema name (default: public)"
+        }
+      },
+      "returns": "List of table names with metadata"
+    },
+    "list_items": {
+      "description": "List items from a specific table",
+      "parameters": {
+        "table": {
+          "type": "string",
+          "required": true,
+          "description": "Table name to query"
+        },
+        "limit": {
+          "type": "number",
+          "required": false,
+          "description": "Maximum number of items to return (default: 100)"
+        },
+        "offset": {
+          "type": "number",
+          "required": false,
+          "description": "Number of items to skip (default: 0)"
+        },
+        "order_by": {
+          "type": "string",
+          "required": false,
+          "description": "Column to order by"
+        },
+        "filters": {
+          "type": "object",
+          "required": false,
+          "description": "Column filters as key-value pairs"
+        }
+      },
+      "returns": "List of items from the table"
+    },
+    "query": {
+      "description": "Execute a custom SQL query (SELECT only for safety)",
+      "parameters": {
+        "sql": {
+          "type": "string",
+          "required": true,
+          "description": "SQL query to execute"
+        },
+        "params": {
+          "type": "array",
+          "required": false,
+          "description": "Query parameters for parameterized queries"
+        }
+      },
+      "returns": "Query results"
+    },
+    "get_table_info": {
+      "description": "Get detailed information about a table",
+      "parameters": {
+        "table": {
+          "type": "string",
+          "required": true,
+          "description": "Table name"
+        }
+      },
+      "returns": "Table schema information including columns and types"
+    },
+    "test_connection": {
+      "description": "Test the database connection",
+      "parameters": {},
+      "returns": "Connection status and database version"
+    }
+  },
+  "build": {
+    "pre_install": [
+      "pip install --upgrade pip",
+      "pip install --upgrade setuptools wheel"
+    ],
+    "post_install": ["python -c \"import psycopg2; print('psycopg2 installed successfully')\""],
+    "environment": {
+      "PYTHONWARNINGS": "ignore",
+      "URLLIB3_DISABLE_WARNINGS": "1",
+      "PIP_PREFER_BINARY": "1"
+    }
+  },
+  "created_at": "",
+  "updated_at": ""
+}

@@ -1,0 +1,57 @@
+{
+  "integration": "postgresql",
+  "config": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "sec_gui",
+    "username": "ddfelts",
+    "password": "",
+    "ssl_mode": "prefer"
+  },
+  "monitoring_rules": [
+    {
+      "name": "Check events table size",
+      "type": "row_count",
+      "table": "events",
+      "threshold": 100,
+      "comparison": "greater_than",
+      "severity": "medium"
+    },
+    {
+      "name": "Check users table not empty",
+      "type": "row_count",
+      "table": "users",
+      "threshold": 0,
+      "comparison": "equals",
+      "severity": "high"
+    },
+    {
+      "name": "Check recent log entries",
+      "type": "table_changes",
+      "table": "logs",
+      "time_column": "created_at",
+      "minutes": 60,
+      "threshold": 50,
+      "severity": "medium"
+    },
+    {
+      "name": "Check critical logs",
+      "type": "query_result",
+      "query": "SELECT * FROM logs WHERE level = 'ERROR' AND created_at > NOW() - INTERVAL '1 hour'",
+      "max_count": 10,
+      "severity": "critical"
+    },
+    {
+      "name": "Verify required tables exist",
+      "type": "table_list",
+      "schema": "public",
+      "expected_tables": ["users", "events", "logs"],
+      "severity": "critical"
+    }
+  ],
+  "alert_config": {
+    "enabled": true,
+    "channels": ["log", "webhook"],
+    "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+  }
+}

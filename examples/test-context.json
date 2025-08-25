@@ -1,8 +1,0 @@
-{
-  "test_value": 75,
-  "incident": {
-    "id": "INC-001",
-    "threat_score": 85,
-    "severity": "high"
-  }
-}
