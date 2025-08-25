@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,7 +35,17 @@ import (
 	tlsManager "SoarAuto/pkg/tls"
 	"SoarAuto/pkg/types"
 	"SoarAuto/pkg/validator"
+	
+	_ "github.com/lib/pq"
 )
+
+// Helper function for min of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 // SecAutoServer represents the modular SOAR automation server
 type SecAutoServer struct {
@@ -88,6 +99,35 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		return nil, fmt.Errorf("failed to create Redis client: %v", err)
 	}
 
+	// Create PostgreSQL database connection
+	var db *sql.DB
+	if cfg.Database.Postgres.Host != "" {
+		connStr := fmt.Sprintf("host=%s port=%d user=%s dbname=%s sslmode=disable",
+			cfg.Database.Postgres.Host,
+			cfg.Database.Postgres.Port,
+			cfg.Database.Postgres.Username,
+			cfg.Database.Postgres.Database)
+		
+		if cfg.Database.Postgres.Password != "" {
+			connStr += fmt.Sprintf(" password=%s", cfg.Database.Postgres.Password)
+		}
+
+		db, err = sql.Open("postgres", connStr)
+		if err != nil {
+			lgr.Warning("Failed to open database connection", map[string]interface{}{
+				"error": err.Error(),
+			})
+		} else if err = db.Ping(); err != nil {
+			lgr.Warning("Failed to ping database", map[string]interface{}{
+				"error": err.Error(),
+			})
+			db.Close()
+			db = nil
+		} else {
+			lgr.Info("PostgreSQL database connected successfully", nil)
+		}
+	}
+
 	// Create Swagger handler
 	swaggerHandler, err := swagger.NewSwaggerUIHandler(strconv.Itoa(cfg.Server.Port))
 	if err != nil {
@@ -121,11 +161,27 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		lgr,
 	)
 
-	// Create client integration manager
-	clientIntegrationManager, err := integrations.NewClientIntegrationManager(
-		filepath.Join("data", "clients"),
-		lgr,
-	)
+	// Create client integration manager with database support
+	var clientIntegrationManager *integrations.ClientIntegrationManager
+	if db != nil {
+		// Use full hybrid storage with database + Redis
+		encryptionKey := cfg.Security.IntegrationEncryptionKey
+		if encryptionKey == "" {
+			encryptionKey = "default-encryption-key-change-in-production"
+		}
+		clientIntegrationManager, err = integrations.NewClientIntegrationManager(
+			db,
+			redisClient.GetClient(),
+			encryptionKey,
+			lgr,
+		)
+	} else {
+		// Fallback to legacy path-based method
+		clientIntegrationManager, err = integrations.NewClientIntegrationManagerWithLegacyPath(
+			filepath.Join("data", "clients"),
+			lgr,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create client integration manager: %v", err)
 	}
@@ -169,6 +225,9 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 		clientManager:            clientManager,
 	}
 
+	// Set integration managers on the rules engine for integration context execution
+	ruleEngine.SetIntegrationManagers(integrationManager, clientIntegrationManager)
+	
 	// Create cluster manager now that we have the server
 	clusterManager = cluster.NewClusterManager("node-modular-1", jobManager, server, lgr)
 	server.clusterManager = clusterManager
@@ -862,16 +921,37 @@ func (s *SecAutoServer) integrationUploadHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Get integration definition from form field
-	definitionStr := r.FormValue("definition")
-	if definitionStr == "" {
-		http.Error(w, "Integration definition is required", http.StatusBadRequest)
+	// Get integration definition file
+	definitionFile, definitionHandler, err := r.FormFile("definition")
+	if err != nil {
+		http.Error(w, "Integration definition file is required", http.StatusBadRequest)
+		return
+	}
+	defer definitionFile.Close()
+
+	// Read definition file content
+	definitionContent, err := io.ReadAll(definitionFile)
+	if err != nil {
+		http.Error(w, "Failed to read definition file", http.StatusBadRequest)
+		return
+	}
+
+
+	// Validate definition file extension
+	if !strings.HasSuffix(strings.ToLower(definitionHandler.Filename), ".json") {
+		response := map[string]interface{}{
+			"success":   false,
+			"message":   "Definition file must have .json extension",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
 	// Parse integration definition
 	var definition integrations.IntegrationDefinition
-	if err := json.Unmarshal([]byte(definitionStr), &definition); err != nil {
+	if err := json.Unmarshal(definitionContent, &definition); err != nil {
 		response := map[string]interface{}{
 			"success":   false,
 			"message":   fmt.Sprintf("Invalid integration definition: %v", err),
@@ -943,13 +1023,15 @@ func (s *SecAutoServer) triggerIntegrationBuild(configPath string, integrationNa
 		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
 	}
 	
-	// Build command to run the integration build script
-	scriptPath := filepath.Join("..", "scripts", "integration_upload_hook.py")
-	cmd := exec.Command(pythonPath, scriptPath, configPath, "--name", integrationName)
-	
-	// Set working directory to parent of SoarAuto directory
+	// Build path to integration builder script
+	// Calculate project root from current working directory (should be SoarAuto/)
 	workDir, _ := os.Getwd()
-	cmd.Dir = filepath.Dir(workDir)
+	projectRoot := filepath.Dir(workDir)
+	scriptPath := filepath.Join(projectRoot, "scripts", "integration_builder.py")
+	cmd := exec.Command(pythonPath, scriptPath, "build", "--config", configPath)
+	
+	// Set working directory to project root
+	cmd.Dir = projectRoot
 	
 	// Run the command and capture output
 	output, err := cmd.CombinedOutput()
@@ -1005,8 +1087,10 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
 	}
 	
-	// Build command to check status
-	scriptPath := filepath.Join("..", "scripts", "build_integration_backend.py")
+	// Build path to integration builder script
+	workDir, _ := os.Getwd()
+	projectRoot := filepath.Dir(workDir)
+	scriptPath := filepath.Join(projectRoot, "scripts", "integration_builder.py")
 	var cmd *exec.Cmd
 	
 	if integrationName != "" {
@@ -1015,9 +1099,8 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 		cmd = exec.Command(pythonPath, scriptPath, "status")
 	}
 	
-	// Set working directory to parent of SoarAuto directory
-	workDir, _ := os.Getwd()
-	cmd.Dir = filepath.Dir(workDir)
+	// Set working directory to project root
+	cmd.Dir = projectRoot
 	
 	// Run the command
 	output, err := cmd.CombinedOutput()

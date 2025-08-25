@@ -42,6 +42,14 @@ database:
   cache_ttl: 3600        # 1 hour for general cache entries
   job_ttl: 86400         # 24 hours for completed/failed jobs
   temp_data_ttl: 300     # 5 minutes for temporary data
+  postgres:
+      host: "localhost"
+      port: 5432
+      database: "soar_auto"
+      username: "ddfelts"
+      password: ""
+      ssl_mode: "disable"
+      encryption_key: "your-32-character-encryption-key"
 
 # Cluster Configuration
 cluster:
@@ -99,7 +107,7 @@ security:
     max_context_size: 1048576
     max_playbook_size: 1048576
     max_script_size: 1048576
-    allowed_script_extensions: [".py", ".js", ".sh", ".ps1"]
+    allowed_script_extensions: [".py"]
     sanitize_inputs: true
   cors:
     enabled: true
@@ -136,6 +144,7 @@ security:
 # Python Configuration
 python:
   venv_path: "../Venv"
+  scripts_path: "data/automations/scripts"
 
 # Integrations Configuration
 integrations:
@@ -155,4 +164,3 @@ integrations:
     blocked_hosts: []
     max_connections: 100
     connection_timeout: 30
-

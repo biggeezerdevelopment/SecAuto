@@ -69,12 +69,13 @@ type BuildConfiguration struct {
 	Environment  map[string]string `json:"environment"`
 }
 
-// IntegrationManager manages global integration definitions and their environments
+// IntegrationManager manages integrations with fast, isolated execution
 type IntegrationManager struct {
 	definitions map[string]*IntegrationDefinition
 	configsPath string
 	scriptsPath string
-	envPath     string // Path for integration environments (site-packages)
+	venvPath    string // Path for UV virtual environments
+	builderPath string // Path to UV builder script
 	pythonPath  string // Path to Python interpreter
 	mutex       sync.RWMutex
 	logger      types.Logger
@@ -82,11 +83,28 @@ type IntegrationManager struct {
 
 // NewIntegrationManager creates a new integration manager
 func NewIntegrationManager(configsPath, scriptsPath, pythonPath string, logger types.Logger) *IntegrationManager {
+	// Make paths absolute if they're relative
+	if !filepath.IsAbs(configsPath) {
+		workDir, _ := os.Getwd()
+		configsPath = filepath.Join(workDir, configsPath)
+	}
+	if !filepath.IsAbs(scriptsPath) {
+		workDir, _ := os.Getwd()
+		scriptsPath = filepath.Join(workDir, scriptsPath)
+	}
+	
+	baseDir := filepath.Dir(configsPath)
+	
+	// Calculate project root path from current working directory (should be in SoarAuto/)
+	workDir, _ := os.Getwd()
+	projectRoot := filepath.Dir(workDir)
+	
 	im := &IntegrationManager{
 		definitions: make(map[string]*IntegrationDefinition),
 		configsPath: configsPath,
 		scriptsPath: scriptsPath,
-		envPath:     filepath.Join(filepath.Dir(configsPath), ".site-packages"),
+		venvPath:    filepath.Join(baseDir, "venvs"), // Virtual environments directory
+		builderPath: filepath.Join(projectRoot, "scripts", "integration_builder.py"),
 		pythonPath:  pythonPath,
 		logger:      logger,
 	}
@@ -94,7 +112,7 @@ func NewIntegrationManager(configsPath, scriptsPath, pythonPath string, logger t
 	// Ensure directories exist
 	os.MkdirAll(im.configsPath, 0755)
 	os.MkdirAll(im.scriptsPath, 0755)
-	os.MkdirAll(im.envPath, 0755)
+	os.MkdirAll(im.venvPath, 0755)
 	
 	// Load existing integration definitions
 	im.loadDefinitions()
@@ -102,7 +120,16 @@ func NewIntegrationManager(configsPath, scriptsPath, pythonPath string, logger t
 	return im
 }
 
-// loadDefinitions loads integration definitions from disk
+// checkUVAvailable checks if UV is available on the system
+func (im *IntegrationManager) checkUVAvailable() error {
+	cmd := exec.Command("uv", "--version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("UV is required but not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh")
+	}
+	return nil
+}
+
+// loadDefinitions loads integration definitions from disk (same as original)
 func (im *IntegrationManager) loadDefinitions() {
 	files, err := filepath.Glob(filepath.Join(im.configsPath, "*.json"))
 	if err != nil {
@@ -138,7 +165,7 @@ func (im *IntegrationManager) loadDefinitions() {
 	})
 }
 
-// UploadIntegration handles uploading a new integration
+// UploadIntegration handles uploading a new integration with UV building
 func (im *IntegrationManager) UploadIntegration(definition *IntegrationDefinition, scriptContent []byte) error {
 	im.mutex.Lock()
 	defer im.mutex.Unlock()
@@ -149,6 +176,11 @@ func (im *IntegrationManager) UploadIntegration(definition *IntegrationDefinitio
 	}
 	if definition.Backend.EntryPoint == "" {
 		return fmt.Errorf("integration entry point is required")
+	}
+
+	// Check UV availability
+	if err := im.checkUVAvailable(); err != nil {
+		return fmt.Errorf("UV check failed: %v", err)
 	}
 
 	// Set timestamps
@@ -176,161 +208,68 @@ func (im *IntegrationManager) UploadIntegration(definition *IntegrationDefinitio
 		return fmt.Errorf("failed to save integration definition: %v", err)
 	}
 
-	// Build the integration environment if required
+	// Build the integration environment with UV if required
 	if definition.Backend.RequiresBuild {
 		if err := im.buildIntegrationEnvironment(definition); err != nil {
 			// Rollback
 			os.Remove(scriptPath)
 			os.Remove(definitionPath)
-			return fmt.Errorf("failed to build integration environment: %v", err)
+			return fmt.Errorf("failed to build integration environment with UV: %v", err)
 		}
 	}
 
 	// Store in memory
 	im.definitions[definition.Name] = definition
 
-	im.logger.Info("Integration uploaded successfully", map[string]interface{}{
+	im.logger.Info("Integration uploaded successfully with UV", map[string]interface{}{
 		"integration": definition.Name,
 		"version":     definition.Version,
+		"builder":     "UV",
 	})
 
 	return nil
 }
 
-// buildIntegrationEnvironment creates the site-packages environment for an integration
+// buildIntegrationEnvironment uses the UV builder to create the environment
 func (im *IntegrationManager) buildIntegrationEnvironment(definition *IntegrationDefinition) error {
-	// Create integration-specific environment directory
-	integrationEnvPath := filepath.Join(im.envPath, definition.Name)
-	if err := os.MkdirAll(integrationEnvPath, 0755); err != nil {
-		return fmt.Errorf("failed to create environment directory: %v", err)
-	}
-
-	// Install packages if specified
-	if len(definition.Dependencies.Packages) > 0 {
-		im.logger.Info("Installing integration dependencies", map[string]interface{}{
-			"integration": definition.Name,
-			"packages":    definition.Dependencies.Packages,
-		})
-
-		for _, pkg := range definition.Dependencies.Packages {
-			cmd := exec.Command(im.pythonPath, "-m", "pip", "install", 
-				"--target", integrationEnvPath, 
-				"--upgrade", pkg)
-			
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-
-			if err := cmd.Run(); err != nil {
-				im.logger.Error("Failed to install package", map[string]interface{}{
-					"integration": definition.Name,
-					"package":     pkg,
-					"error":       err.Error(),
-					"stderr":      stderr.String(),
-				})
-				return fmt.Errorf("failed to install %s: %v", pkg, err)
-			}
-		}
-	}
-
-	// Run post-install commands if specified
-	for _, cmdStr := range definition.Build.PostInstall {
-		parts := strings.Fields(cmdStr)
-		if len(parts) == 0 {
-			continue
-		}
-
-		cmd := exec.Command(parts[0], parts[1:]...)
-		cmd.Dir = integrationEnvPath
-		
-		// Set environment variables
-		for k, v := range definition.Build.Environment {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-		}
-
-		if err := cmd.Run(); err != nil {
-			im.logger.Warning("Post-install command failed", map[string]interface{}{
-				"integration": definition.Name,
-				"command":     cmdStr,
-				"error":       err.Error(),
-			})
-		}
-	}
-
-	// Create a marker file to indicate successful build
-	markerPath := filepath.Join(integrationEnvPath, ".build_complete")
-	os.WriteFile(markerPath, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
-
-	im.logger.Info("Integration environment built successfully", map[string]interface{}{
+	im.logger.Info("Building integration environment with UV", map[string]interface{}{
 		"integration": definition.Name,
-		"path":        integrationEnvPath,
+	})
+
+	// Use the UV builder script
+	configPath := filepath.Join(im.configsPath, definition.Name+".json")
+	
+	cmd := exec.Command(im.pythonPath, im.builderPath, "build", "--config", configPath)
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("UV builder failed: %v\nStderr: %s\nStdout: %s", 
+			err, stderr.String(), stdout.String())
+	}
+
+	// Parse the result
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return fmt.Errorf("failed to parse UV builder result: %v", err)
+	}
+
+	if !result["success"].(bool) {
+		return fmt.Errorf("UV builder reported failure: %v", result["error"])
+	}
+
+	im.logger.Info("Integration environment built successfully with UV", map[string]interface{}{
+		"integration": definition.Name,
+		"builder":     "UV",
+		"venv_path":   result["venv_path"],
 	})
 
 	return nil
 }
 
-// GetIntegration retrieves an integration definition
-func (im *IntegrationManager) GetIntegration(name string) (*IntegrationDefinition, error) {
-	im.mutex.RLock()
-	defer im.mutex.RUnlock()
-
-	definition, exists := im.definitions[name]
-	if !exists {
-		return nil, fmt.Errorf("integration not found: %s", name)
-	}
-
-	// Return a copy
-	defCopy := *definition
-	return &defCopy, nil
-}
-
-// ListIntegrations returns all available integrations
-func (im *IntegrationManager) ListIntegrations() []*IntegrationDefinition {
-	im.mutex.RLock()
-	defer im.mutex.RUnlock()
-
-	integrations := make([]*IntegrationDefinition, 0, len(im.definitions))
-	for _, def := range im.definitions {
-		defCopy := *def
-		integrations = append(integrations, &defCopy)
-	}
-
-	return integrations
-}
-
-// DeleteIntegration removes an integration and its environment
-func (im *IntegrationManager) DeleteIntegration(name string) error {
-	im.mutex.Lock()
-	defer im.mutex.Unlock()
-
-	definition, exists := im.definitions[name]
-	if !exists {
-		return fmt.Errorf("integration not found: %s", name)
-	}
-
-	// Remove script file
-	scriptPath := filepath.Join(im.scriptsPath, definition.Backend.EntryPoint)
-	os.Remove(scriptPath)
-
-	// Remove definition file
-	definitionPath := filepath.Join(im.configsPath, name+".json")
-	os.Remove(definitionPath)
-
-	// Remove environment directory
-	envPath := filepath.Join(im.envPath, name)
-	os.RemoveAll(envPath)
-
-	// Remove from memory
-	delete(im.definitions, name)
-
-	im.logger.Info("Integration deleted", map[string]interface{}{
-		"integration": name,
-	})
-
-	return nil
-}
-
-// ExecuteIntegration runs an integration with client-specific configuration
+// ExecuteIntegration runs an integration using UV for optimal performance
 func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientConfig *ClientIntegrationConfig, function string, params map[string]interface{}) (interface{}, error) {
 	im.mutex.RLock()
 	definition, exists := im.definitions[integrationName]
@@ -343,6 +282,21 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 	// Validate the function exists
 	if _, exists := definition.Functions[function]; !exists {
 		return nil, fmt.Errorf("function '%s' not found in integration '%s'", function, integrationName)
+	}
+
+	// Check UV availability
+	if err := im.checkUVAvailable(); err != nil {
+		return nil, fmt.Errorf("UV check failed: %v", err)
+	}
+
+	// Check if integration environment needs to be built
+	if definition.Backend.RequiresBuild && !im.IsIntegrationBuilt(integrationName) {
+		im.logger.Info("Building integration environment with UV", map[string]interface{}{
+			"integration": integrationName,
+		})
+		if err := im.buildIntegrationEnvironment(definition); err != nil {
+			return nil, fmt.Errorf("failed to build integration environment: %v", err)
+		}
 	}
 
 	// Prepare the execution context
@@ -358,28 +312,29 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 		return nil, fmt.Errorf("failed to marshal context: %v", err)
 	}
 
-	// Get script path
+	// Get script path and venv path
 	scriptPath := filepath.Join(im.scriptsPath, definition.Backend.EntryPoint)
+	venvPath := filepath.Join(im.venvPath, integrationName)
+	pythonPath := filepath.Join(venvPath, "bin", "python")
 
-	// Create command with timeout
+	// Check if venv exists
+	if _, err := os.Stat(pythonPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("UV virtual environment not found for integration: %s", integrationName)
+	}
+
+	// Create command with timeout using UV run for optimal execution
 	timeout := time.Duration(definition.Backend.Timeout) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second
 	}
 
-	// Prepare Python path with integration's site-packages
-	integrationEnvPath := filepath.Join(im.envPath, integrationName)
+	// Use UV run for the best performance and isolation
+	cmd := exec.Command("uv", "run", "--python", pythonPath, scriptPath)
 	
-	cmd := exec.Command(im.pythonPath, scriptPath)
-	
-	// Set PYTHONPATH to include integration's site-packages
-	pythonPath := integrationEnvPath
-	if existingPath := os.Getenv("PYTHONPATH"); existingPath != "" {
-		pythonPath = integrationEnvPath + string(os.PathListSeparator) + existingPath
-	}
-	
+	// Set environment variables
+	secautoRoot, _ := filepath.Abs(filepath.Join(filepath.Dir(im.configsPath), ".."))
 	cmd.Env = append(os.Environ(), 
-		fmt.Sprintf("PYTHONPATH=%s", pythonPath),
+		fmt.Sprintf("SECAUTO_ROOT=%s", secautoRoot),
 		fmt.Sprintf("INTEGRATION_NAME=%s", integrationName),
 		fmt.Sprintf("INTEGRATION_FUNCTION=%s", function),
 	)
@@ -399,7 +354,7 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start integration: %v", err)
+		return nil, fmt.Errorf("failed to start integration with UV: %v", err)
 	}
 
 	// Wait with timeout
@@ -440,19 +395,57 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 	return result, nil
 }
 
-// GetIntegrationEnvironmentPath returns the site-packages path for an integration
-func (im *IntegrationManager) GetIntegrationEnvironmentPath(integrationName string) string {
-	return filepath.Join(im.envPath, integrationName)
-}
-
-// IsIntegrationBuilt checks if an integration's environment has been built
+// IsIntegrationBuilt checks if an integration's UV environment has been built
 func (im *IntegrationManager) IsIntegrationBuilt(integrationName string) bool {
-	markerPath := filepath.Join(im.envPath, integrationName, ".build_complete")
-	_, err := os.Stat(markerPath)
+	venvPath := filepath.Join(im.venvPath, integrationName)
+	pythonPath := filepath.Join(venvPath, "bin", "python")
+	_, err := os.Stat(pythonPath)
+	if err != nil && im.logger != nil {
+		im.logger.Debug("Integration built check", map[string]interface{}{
+			"integration": integrationName,
+			"venvPath": venvPath,
+			"pythonPath": pythonPath,
+			"exists": err == nil,
+		})
+	}
 	return err == nil
 }
 
-// RebuildIntegrationEnvironment rebuilds an integration's environment
+// GetIntegrationEnvironmentPath returns the venv path for an integration
+func (im *IntegrationManager) GetIntegrationEnvironmentPath(integrationName string) string {
+	return filepath.Join(im.venvPath, integrationName)
+}
+
+// CleanIntegration removes an integration's UV environment
+func (im *IntegrationManager) CleanIntegration(integrationName string) error {
+	im.logger.Info("Cleaning UV integration environment", map[string]interface{}{
+		"integration": integrationName,
+	})
+
+	// Use the UV builder to clean
+	cmd := exec.Command(im.pythonPath, im.builderPath, "clean", "--name", integrationName)
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		im.logger.Error("Failed to clean UV integration environment", map[string]interface{}{
+			"integration": integrationName,
+			"error":       err.Error(),
+			"stderr":      stderr.String(),
+		})
+		return fmt.Errorf("failed to clean UV environment: %v", err)
+	}
+
+	im.logger.Info("Successfully cleaned UV integration environment", map[string]interface{}{
+		"integration": integrationName,
+	})
+
+	return nil
+}
+
+// RebuildIntegrationEnvironment rebuilds an integration's UV environment
 func (im *IntegrationManager) RebuildIntegrationEnvironment(integrationName string) error {
 	im.mutex.RLock()
 	definition, exists := im.definitions[integrationName]
@@ -462,10 +455,117 @@ func (im *IntegrationManager) RebuildIntegrationEnvironment(integrationName stri
 		return fmt.Errorf("integration not found: %s", integrationName)
 	}
 
-	// Remove existing environment
-	envPath := filepath.Join(im.envPath, integrationName)
-	os.RemoveAll(envPath)
+	// Clean existing environment
+	im.CleanIntegration(integrationName)
 
-	// Rebuild
+	// Rebuild with UV
 	return im.buildIntegrationEnvironment(definition)
+}
+
+// ListIntegrations returns all available integrations (same as original)
+func (im *IntegrationManager) ListIntegrations() []*IntegrationDefinition {
+	im.mutex.RLock()
+	defer im.mutex.RUnlock()
+
+	integrations := make([]*IntegrationDefinition, 0, len(im.definitions))
+	for _, def := range im.definitions {
+		defCopy := *def
+		integrations = append(integrations, &defCopy)
+	}
+
+	return integrations
+}
+
+// GetIntegration retrieves an integration definition (same as original)
+func (im *IntegrationManager) GetIntegration(name string) (*IntegrationDefinition, error) {
+	im.mutex.RLock()
+	defer im.mutex.RUnlock()
+
+	definition, exists := im.definitions[name]
+	if !exists {
+		return nil, fmt.Errorf("integration not found: %s", name)
+	}
+
+	// Return a copy
+	defCopy := *definition
+	return &defCopy, nil
+}
+
+// GetDefinition returns the definition for a specific integration (same as original)
+func (im *IntegrationManager) GetDefinition(name string) (*IntegrationDefinition, error) {
+	im.mutex.RLock()
+	defer im.mutex.RUnlock()
+	
+	definition, exists := im.definitions[name]
+	if !exists {
+		return nil, fmt.Errorf("integration not found: %s", name)
+	}
+	
+	return definition, nil
+}
+
+// DeleteIntegration removes an integration and its UV environment
+func (im *IntegrationManager) DeleteIntegration(name string) error {
+	im.mutex.Lock()
+	defer im.mutex.Unlock()
+
+	definition, exists := im.definitions[name]
+	if !exists {
+		return fmt.Errorf("integration not found: %s", name)
+	}
+
+	// Remove script file
+	scriptPath := filepath.Join(im.scriptsPath, definition.Backend.EntryPoint)
+	os.Remove(scriptPath)
+
+	// Remove definition file
+	definitionPath := filepath.Join(im.configsPath, name+".json")
+	os.Remove(definitionPath)
+
+	// Clean UV environment
+	im.CleanIntegration(name)
+
+	// Remove from memory
+	delete(im.definitions, name)
+
+	im.logger.Info("Integration deleted with UV cleanup", map[string]interface{}{
+		"integration": name,
+	})
+
+	return nil
+}
+
+// MigrateFromOldSystem migrates an integration from the old .site-packages system to UV
+func (im *IntegrationManager) MigrateFromOldSystem(integrationName string) error {
+	im.logger.Info("Migrating integration to UV system", map[string]interface{}{
+		"integration": integrationName,
+	})
+
+	// Use the UV builder to migrate
+	cmd := exec.Command(im.pythonPath, im.builderPath, "migrate", "--name", integrationName)
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("migration failed: %v\nStderr: %s", err, stderr.String())
+	}
+
+	// Parse the result
+	var result map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		return fmt.Errorf("failed to parse migration result: %v", err)
+	}
+
+	if !result["success"].(bool) {
+		return fmt.Errorf("migration failed: %v", result["error"])
+	}
+
+	im.logger.Info("Successfully migrated integration to UV", map[string]interface{}{
+		"integration": integrationName,
+		"message":     result["message"],
+	})
+
+	return nil
 }

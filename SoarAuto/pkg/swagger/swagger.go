@@ -134,6 +134,21 @@ func (h *SwaggerUIHandler) serveSwaggerUI(w http.ResponseWriter, r *http.Request
 	w.Write([]byte(html))
 }
 
+// GetSpec returns the OpenAPI specification as a map
+func GetSpec() (map[string]interface{}, error) {
+	specBytes, err := readOpenAPISpec("8080")
+	if err != nil {
+		return nil, err
+	}
+	
+	var spec map[string]interface{}
+	if err := json.Unmarshal(specBytes, &spec); err != nil {
+		return nil, err
+	}
+	
+	return spec, nil
+}
+
 // readOpenAPISpec generates the OpenAPI specification for the modular build
 func readOpenAPISpec(serverPort string) ([]byte, error) {
 	spec := map[string]interface{}{
@@ -816,8 +831,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 									"properties": map[string]interface{}{
 										"definition": map[string]interface{}{
 											"type":        "string",
-											"description": "JSON integration definition containing metadata, dependencies, configuration fields, and function definitions",
-											"example":     `{"name": "virustotal", "version": "1.0.0", "description": "VirusTotal API integration", "backend": {"entry_point": "virustotal.py", "requires_build": true}, "dependencies": {"packages": ["requests", "vt-py"]}, "configuration": {"api_key": {"type": "string", "required": true, "sensitive": true}}, "functions": {"scan_hash": {"description": "Scan file hash", "parameters": {"hash": {"type": "string", "required": true}}}}}`,
+											"format":      "binary",
+											"description": "JSON integration definition file (.json) containing metadata, dependencies, configuration fields, and function definitions",
 										},
 										"script": map[string]interface{}{
 											"type":        "string",
@@ -2122,9 +2137,11 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						},
 					},
 				},
-				"post": map[string]interface{}{
-					"summary":     "Create Client Integration",
-					"description": "Create a new integration for a specific client",
+			},
+			"/clients/{clientId}/integrations/{integrationName}/config": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Get Client Integration Configuration",
+					"description": "Get configuration for a specific client integration",
 					"tags":        []string{"Clients", "Integrations"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"parameters": []map[string]interface{}{
@@ -2137,26 +2154,196 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 								"type": "string",
 							},
 						},
+						{
+							"name":        "integrationName",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., postgresql, virustotal)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Integration configuration retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientIntegrationConfigResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client or integration not found",
+						},
+					},
+				},
+				"post": map[string]interface{}{
+					"summary":     "Create Client Integration Configuration",
+					"description": "Create configuration for a specific client integration",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integrationName",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., postgresql, virustotal)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
 					},
 					"requestBody": map[string]interface{}{
 						"required": true,
 						"content": map[string]interface{}{
 							"application/json": map[string]interface{}{
 								"schema": map[string]interface{}{
-									"$ref": "#/components/schemas/ClientIntegrationCreateRequest",
+									"$ref": "#/components/schemas/ClientIntegrationConfigRequest",
 								},
 							},
 						},
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
-							"description": "Client integration created successfully",
+							"description": "Integration configuration created successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientIntegrationConfigResponse",
+									},
+								},
+							},
 						},
 						"400": map[string]interface{}{
-							"description": "Invalid request",
+							"description": "Invalid request or configuration",
 						},
 						"404": map[string]interface{}{
-							"description": "Client not found",
+							"description": "Client or integration not found",
+						},
+					},
+				},
+				"put": map[string]interface{}{
+					"summary":     "Update Client Integration Configuration",
+					"description": "Update configuration for a specific client integration",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integrationName",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., postgresql, virustotal)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/ClientIntegrationConfigRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Integration configuration updated successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientIntegrationConfigResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request or configuration",
+						},
+						"404": map[string]interface{}{
+							"description": "Client or integration not found",
+						},
+					},
+				},
+			},
+			"/clients/{clientId}/integrations/{integrationName}/execute": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Execute Client Integration Function",
+					"description": "Execute a specific function on a client integration",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integrationName",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., postgresql, virustotal)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"$ref": "#/components/schemas/IntegrationExecuteRequest",
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Integration function executed successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/IntegrationExecuteResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid request or function parameters",
+						},
+						"404": map[string]interface{}{
+							"description": "Client, integration, or function not found",
+						},
+						"500": map[string]interface{}{
+							"description": "Integration execution failed",
 						},
 					},
 				},
@@ -3894,6 +4081,334 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						"generated_keys": map[string]interface{}{
 							"type":        "integer",
 							"description": "Number of API-generated keys",
+						},
+					},
+				},
+				"ClientIntegrationConfigRequest": map[string]interface{}{
+					"type": "object",
+					"required": []string{"name"},
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{
+							"type":        "string",
+							"description": "Integration name",
+							"example":     "postgresql",
+						},
+						"config": map[string]interface{}{
+							"type":        "object",
+							"description": "Integration configuration parameters",
+							"properties": map[string]interface{}{
+								"host": map[string]interface{}{
+									"type":        "string",
+									"description": "Database host",
+									"example":     "localhost",
+								},
+								"port": map[string]interface{}{
+									"type":        "integer",
+									"description": "Database port",
+									"example":     5432,
+								},
+								"database": map[string]interface{}{
+									"type":        "string",
+									"description": "Database name",
+									"example":     "mydb",
+								},
+								"username": map[string]interface{}{
+									"type":        "string",
+									"description": "Database username",
+									"example":     "postgres",
+								},
+								"password": map[string]interface{}{
+									"type":        "string",
+									"description": "Database password",
+									"example":     "password",
+								},
+								"ssl_mode": map[string]interface{}{
+									"type":        "string",
+									"description": "SSL connection mode",
+									"example":     "prefer",
+									"enum":        []string{"disable", "allow", "prefer", "require"},
+								},
+							},
+						},
+						"credentials": map[string]interface{}{
+							"type":        "object",
+							"description": "Encrypted credentials (optional, can be in config)",
+							"properties": map[string]interface{}{
+								"username": map[string]interface{}{
+									"type":        "string",
+									"description": "Database username",
+								},
+								"password": map[string]interface{}{
+									"type":        "string",
+									"description": "Database password",
+								},
+							},
+						},
+					},
+				},
+				"ClientIntegrationConfigResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether request was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"config": map[string]interface{}{
+							"type":        "object",
+							"description": "Integration configuration (credentials excluded)",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+				},
+				"IntegrationExecuteRequest": map[string]interface{}{
+					"type": "object",
+					"required": []string{"function"},
+					"properties": map[string]interface{}{
+						"function": map[string]interface{}{
+							"type":        "string",
+							"description": "Function name to execute",
+							"example":     "test_connection",
+						},
+						"params": map[string]interface{}{
+							"type":        "object",
+							"description": "Function parameters",
+							"example": map[string]interface{}{
+								"table":  "users",
+								"limit":  10,
+								"offset": 0,
+							},
+						},
+					},
+				},
+				"IntegrationExecuteResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether execution was successful",
+						},
+						"result": map[string]interface{}{
+							"type":        "object",
+							"description": "Function execution result",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+				},
+				"ClientListResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether request was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"clients": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"id": map[string]interface{}{
+										"type":        "string",
+										"description": "Client unique identifier",
+									},
+									"name": map[string]interface{}{
+										"type":        "string",
+										"description": "Client name",
+									},
+									"description": map[string]interface{}{
+										"type":        "string",
+										"description": "Client description",
+									},
+									"created_at": map[string]interface{}{
+										"type":        "string",
+										"format":      "date-time",
+										"description": "Client creation timestamp",
+									},
+									"updated_at": map[string]interface{}{
+										"type":        "string",
+										"format":      "date-time",
+										"description": "Client last update timestamp",
+									},
+									"status": map[string]interface{}{
+										"type":        "string",
+										"description": "Client status",
+										"enum":        []string{"active", "inactive", "suspended"},
+									},
+								},
+							},
+							"description": "List of clients in the system",
+						},
+						"count": map[string]interface{}{
+							"type":        "integer",
+							"description": "Total number of clients",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+					"required": []string{"success", "message", "clients", "count", "timestamp"},
+				},
+				"ClientResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether request was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"client": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"id": map[string]interface{}{
+									"type":        "string",
+									"description": "Client unique identifier",
+								},
+								"name": map[string]interface{}{
+									"type":        "string",
+									"description": "Client name",
+								},
+								"description": map[string]interface{}{
+									"type":        "string",
+									"description": "Client description",
+								},
+								"created_at": map[string]interface{}{
+									"type":        "string",
+									"format":      "date-time",
+									"description": "Client creation timestamp",
+								},
+								"updated_at": map[string]interface{}{
+									"type":        "string",
+									"format":      "date-time",
+									"description": "Client last update timestamp",
+								},
+								"status": map[string]interface{}{
+									"type":        "string",
+									"description": "Client status",
+									"enum":        []string{"active", "inactive", "suspended"},
+								},
+							},
+							"description": "Client information",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+					"required": []string{"success", "message", "client", "timestamp"},
+				},
+				"ClientCreateResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether client creation was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"client": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"id": map[string]interface{}{
+									"type":        "string",
+									"description": "Newly created client unique identifier",
+								},
+								"name": map[string]interface{}{
+									"type":        "string",
+									"description": "Client name",
+								},
+								"description": map[string]interface{}{
+									"type":        "string",
+									"description": "Client description",
+								},
+								"created_at": map[string]interface{}{
+									"type":        "string",
+									"format":      "date-time",
+									"description": "Client creation timestamp",
+								},
+								"status": map[string]interface{}{
+									"type":        "string",
+									"description": "Client status",
+									"enum":        []string{"active", "inactive", "suspended"},
+								},
+							},
+							"description": "Newly created client information",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+					"required": []string{"success", "message", "client", "timestamp"},
+				},
+				"ClientIntegrationListResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether request was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"integrations": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"name": map[string]interface{}{
+										"type":        "string",
+										"description": "Integration name",
+									},
+									"configured": map[string]interface{}{
+										"type":        "boolean",
+										"description": "Whether integration is configured for this client",
+									},
+									"last_used": map[string]interface{}{
+										"type":        "string",
+										"format":      "date-time",
+										"description": "Last usage timestamp",
+									},
+								},
+							},
+							"description": "List of client integrations",
+						},
+						"count": map[string]interface{}{
+							"type":        "integer",
+							"description": "Number of integrations",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
 						},
 					},
 				},

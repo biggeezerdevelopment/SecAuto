@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "secauto-base-api"
+version = "1.0.0"
+description = "SecAuto Base API for automation scripts"
+dependencies = []
+
+[project.scripts]
+secauto-base = "SoarBaseAPI:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

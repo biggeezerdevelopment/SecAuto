@@ -4,24 +4,29 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"SoarAuto/pkg/cache"
 	"SoarAuto/pkg/config"
+	"SoarAuto/pkg/integrations"
 	"SoarAuto/pkg/types"
 )
 
 // Engine represents the SOAR rules engine
 type Engine struct {
-	config        *config.Config
-	context       map[string]interface{}
-	contextHash   string
-	pluginManager types.PlatformPluginManager
-	cache         types.ContextCache
+	config                   *config.Config
+	context                  map[string]interface{}
+	contextHash              string
+	pluginManager            types.PlatformPluginManager
+	cache                    types.ContextCache
+	integrationManager       *integrations.IntegrationManager
+	clientIntegrationManager *integrations.ClientIntegrationManager
 	
 	// Pre-compiled regular expressions for better performance
 	templateVarRegex    *regexp.Regexp
@@ -101,6 +106,12 @@ func (re *Engine) GetContext() map[string]interface{} {
 // GetCacheStats returns cache statistics
 func (re *Engine) GetCacheStats() types.CacheStats {
 	return re.cache.GetStats()
+}
+
+// SetIntegrationManagers sets the integration managers for the engine
+func (re *Engine) SetIntegrationManagers(integrationManager *integrations.IntegrationManager, clientIntegrationManager *integrations.ClientIntegrationManager) {
+	re.integrationManager = integrationManager
+	re.clientIntegrationManager = clientIntegrationManager
 }
 
 // ClearCache clears the cache
@@ -279,6 +290,13 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 		return nil, fmt.Errorf("script not found: %s", scriptPath)
 	}
 	
+	// Check if this should run in integration context
+	if integrationName, hasIntegration := operation["run_i"]; hasIntegration {
+		log.Printf("Found run_i parameter: %v, executing in integration context", integrationName)
+		// Execute in integration context
+		return re.executeInIntegrationContext(processedScriptName, integrationName, operation, data)
+	}
+	
 	// Process additional parameters from the operation and merge with context
 	enhancedData := make(map[string]interface{})
 	
@@ -287,9 +305,9 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 		enhancedData[k] = v
 	}
 	
-	// Process additional parameters (everything except "run")
+	// Process additional parameters (everything except "run" and "run_i")
 	for key, value := range operation {
-		if key != "run" {
+		if key != "run" && key != "run_i" {
 			// Process template variables in the parameter value
 			processedValue := re.processTemplateVariables(value, data)
 			enhancedData[key] = processedValue
@@ -884,7 +902,17 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 	cmd := exec.Command(pythonPath, scriptPath)
 	
 	// Set environment variables
-	cmd.Env = append(os.Environ(), fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)))
+	// Set INTEGRATION_NAME=default to enable sitecustomize.py function injection
+	cmd.Env = append(os.Environ(), 
+		fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)),
+		"INTEGRATION_NAME=default",
+	)
+	
+	// Add server directory to Python path for fallback imports
+	serverDir := "server"
+	if _, err := os.Stat(serverDir); err == nil {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("PYTHONPATH=%s", serverDir))
+	}
 	
 	// Prepare stdin with context data
 	cmd.Stdin = bytes.NewReader(contextJSON)
@@ -934,6 +962,196 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 		// If not JSON, return as plain text
 		return map[string]interface{}{
 			"script":    scriptPath,
+			"executed":  true,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"output":    outputStr,
+			"stderr":    stderr.String(),
+		}, nil
+	}
+	
+	return result, nil
+}
+
+// executeInIntegrationContext executes a script in the context of a specific integration
+func (re *Engine) executeInIntegrationContext(scriptName string, integrationName interface{}, operation map[string]interface{}, data map[string]interface{}) (interface{}, error) {
+	log.Printf("executeInIntegrationContext called with script: %s, integration: %v", scriptName, integrationName)
+	
+	// Check if integration managers are available
+	if re.integrationManager == nil || re.clientIntegrationManager == nil {
+		log.Printf("Integration managers not available: manager=%v, clientManager=%v", re.integrationManager != nil, re.clientIntegrationManager != nil)
+		return nil, fmt.Errorf("integration managers not available")
+	}
+	
+	// Convert integration name to string
+	integrationNameStr, ok := integrationName.(string)
+	if !ok {
+		return nil, fmt.Errorf("integration name must be a string")
+	}
+	
+	// Get client_id from context
+	clientID, exists := data["client_id"]
+	if !exists {
+		return nil, fmt.Errorf("client_id required for integration context execution")
+	}
+	
+	clientIDStr, ok := clientID.(string)
+	if !ok {
+		return nil, fmt.Errorf("client_id must be a string")
+	}
+	
+	// Get client integration configuration
+	clientConfig, err := re.clientIntegrationManager.GetClientIntegrationConfig(clientIDStr, integrationNameStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client integration config: %v", err)
+	}
+	
+	if clientConfig == nil {
+		return nil, fmt.Errorf("integration '%s' not configured for client '%s'", integrationNameStr, clientIDStr)
+	}
+	
+	// Process additional parameters for the automation context
+	automationData := make(map[string]interface{})
+	
+	// Copy original context
+	for k, v := range data {
+		automationData[k] = v
+	}
+	
+	// Add configuration parameters (everything except "run" and "run_i")
+	for key, value := range operation {
+		if key != "run" && key != "run_i" {
+			processedValue := re.processTemplateVariables(value, data)
+			automationData[key] = processedValue
+		}
+	}
+	
+	// Execute the automation using integration execution with custom function
+	// The automation script will be executed in the integration's Python environment
+	// and will have access to the integration loader
+	return re.executeAutomationInIntegrationContext(scriptName, integrationNameStr, clientConfig, automationData)
+}
+
+// executeAutomationInIntegrationContext executes an automation script in the integration Python environment
+func (re *Engine) executeAutomationInIntegrationContext(scriptName, integrationName string, clientConfig *integrations.ClientIntegrationConfig, automationData map[string]interface{}) (interface{}, error) {
+	// Get the integration definition to understand the Python environment
+	definition, err := re.integrationManager.GetDefinition(integrationName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get integration definition: %v", err)
+	}
+	
+	// Check if integration environment needs to be built
+	isBuilt := re.integrationManager.IsIntegrationBuilt(integrationName)
+	log.Printf("Integration %s: RequiresBuild=%v, IsBuilt=%v", integrationName, definition.Backend.RequiresBuild, isBuilt)
+	
+	if definition.Backend.RequiresBuild && !isBuilt {
+		log.Printf("Integration environment not built for: %s", integrationName)
+		return nil, fmt.Errorf("integration environment not built for '%s'. Please build the integration environment first", integrationName)
+	}
+	
+	// Get the automation script path (in automations directory, not integration scripts)
+	automationScriptPath := re.getScriptPath(scriptName)
+	
+	// Check if automation script exists
+	if _, err := os.Stat(automationScriptPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("automation script not found: %s", automationScriptPath)
+	}
+	
+	// Prepare the context for the automation
+	// This includes the integration configuration and automation-specific data
+	context := map[string]interface{}{
+		"client_id":         automationData["client_id"],
+		"integration_name":  integrationName,
+		"integration_config": clientConfig.Config,
+		"credentials":       clientConfig.Credentials,
+		"config":           automationData, // Pass all automation parameters
+	}
+	
+	contextJSON, err := json.Marshal(context)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal automation context: %v", err)
+	}
+	
+	// Use the integration's Python environment
+	pythonPath := "python3" // Default
+	if definition.Backend.Type == "python" {
+		// Use the UV virtual environment for the integration
+		venvPath := fmt.Sprintf("data/integrations/venvs/%s", integrationName)
+		uvPythonPath := filepath.Join(venvPath, "bin", "python")
+		
+		// Check if the UV virtual environment exists
+		if _, err := os.Stat(uvPythonPath); err == nil {
+			pythonPath = uvPythonPath
+		}
+	}
+	
+	// Create the command with timeout
+	timeout := time.Duration(re.config.Python.ScriptTimeout) * time.Second
+	if timeout == 0 {
+		timeout = 300 * time.Second // 5 minute default
+	}
+	
+	// Execute the automation script
+	cmd := exec.Command(pythonPath, automationScriptPath)
+	
+	// Set up environment for integration context
+	env := append(os.Environ(), 
+		fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)),
+		fmt.Sprintf("INTEGRATION_NAME=%s", integrationName),
+	)
+	
+	// Add server directory to Python path for secauto_base imports (fallback)
+	serverDir := "server"
+	if _, err := os.Stat(serverDir); err == nil {
+		env = append(env, fmt.Sprintf("PYTHONPATH=%s", serverDir))
+	}
+	
+	cmd.Env = env
+	cmd.Stdin = bytes.NewReader(contextJSON)
+	
+	// Capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start automation script %s: %v", automationScriptPath, err)
+	}
+	
+	// Wait with timeout
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	
+	select {
+	case err := <-done:
+		if err != nil {
+			return nil, fmt.Errorf("automation execution failed: %v\nStderr: %s", err, stderr.String())
+		}
+	case <-time.After(timeout):
+		cmd.Process.Kill()
+		return nil, fmt.Errorf("automation script timed out after %v", timeout)
+	}
+	
+	// Parse the output as JSON if possible
+	outputStr := strings.TrimSpace(stdout.String())
+	if outputStr == "" {
+		return map[string]interface{}{
+			"script":    automationScriptPath,
+			"executed":  true,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"output":    "",
+			"stderr":    stderr.String(),
+		}, nil
+	}
+	
+	// Try to parse as JSON
+	var result interface{}
+	if err := json.Unmarshal([]byte(outputStr), &result); err != nil {
+		// If not valid JSON, return as plain text
+		return map[string]interface{}{
+			"script":    automationScriptPath,
 			"executed":  true,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"output":    outputStr,

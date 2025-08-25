@@ -82,6 +82,20 @@ type DatabaseConfig struct {
 	CacheTTL      int `yaml:"cache_ttl"`       // Default TTL for cache entries (0 = no expiration)
 	JobTTL        int `yaml:"job_ttl"`         // TTL for completed/failed jobs (0 = no expiration)
 	TempDataTTL   int `yaml:"temp_data_ttl"`   // TTL for temporary data (0 = no expiration)
+	
+	// PostgreSQL configuration
+	Postgres PostgresConfig `yaml:"postgres"`
+}
+
+// PostgresConfig holds PostgreSQL database configuration
+type PostgresConfig struct {
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port"`
+	Database      string `yaml:"database"`
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+	SSLMode       string `yaml:"ssl_mode"`
+	EncryptionKey string `yaml:"encryption_key"`
 }
 
 // ClusterConfig holds distributed cluster configuration

@@ -1,37 +1,41 @@
 package integrations
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
-	"time"
 
-	"SoarAuto/pkg/security"
+	"github.com/redis/go-redis/v9"
 	"SoarAuto/pkg/types"
 )
 
 // ClientIntegrationManager manages client-specific integration configurations
+// Now uses hybrid database + Redis storage instead of files
 type ClientIntegrationManager struct {
-	clientsPath string
-	encryptor   *security.Encryptor
-	mutex       sync.RWMutex
-	logger      types.Logger
+	configManager *ConfigManager
+	mutex         sync.RWMutex
+	logger        types.Logger
 }
 
 // NewClientIntegrationManager creates a new client integration manager
-func NewClientIntegrationManager(clientsPath string, logger types.Logger) (*ClientIntegrationManager, error) {
-	encryptor, err := security.NewEncryptor()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize encryptor: %v", err)
-	}
+func NewClientIntegrationManager(db *sql.DB, redis *redis.Client, encryptionKey string, logger types.Logger) (*ClientIntegrationManager, error) {
+	configManager := NewConfigManager(db, redis, encryptionKey, logger)
 
 	return &ClientIntegrationManager{
-		clientsPath: clientsPath,
-		encryptor:   encryptor,
-		logger:      logger,
+		configManager: configManager,
+		logger:        logger,
+	}, nil
+}
+
+// NewClientIntegrationManagerWithLegacyPath creates a new client integration manager with legacy file-based storage
+// This is a temporary function to maintain compatibility until database migration is complete
+func NewClientIntegrationManagerWithLegacyPath(clientsPath string, logger types.Logger) (*ClientIntegrationManager, error) {
+	// For now, use Redis-only config manager with nil database
+	configManager := NewConfigManager(nil, nil, "default-encryption-key", logger)
+
+	return &ClientIntegrationManager{
+		configManager: configManager,
+		logger:        logger,
 	}, nil
 }
 
@@ -51,32 +55,24 @@ func (cim *ClientIntegrationManager) GetClientIntegrationConfig(clientID, integr
 	cim.mutex.RLock()
 	defer cim.mutex.RUnlock()
 
-	configPath := filepath.Join(cim.clientsPath, clientID, "integrations", "configs", integrationName+".json")
-	
-	data, err := os.ReadFile(configPath)
+	// Use the hybrid ConfigManager instead of file system
+	dbConfig, err := cim.configManager.GetClientIntegrationConfig(clientID, integrationName)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("integration config not found for client %s: %s", clientID, integrationName)
-		}
-		return nil, fmt.Errorf("failed to read integration config: %v", err)
+		return nil, fmt.Errorf("failed to get client integration config: %v", err)
 	}
 
-	var config ClientIntegrationConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal integration config: %v", err)
+	// Convert from database model to the existing ClientIntegrationConfig format
+	config := &ClientIntegrationConfig{
+		Name:        dbConfig.IntegrationName,
+		Enabled:     dbConfig.Enabled,
+		Config:      dbConfig.Config,
+		Credentials: dbConfig.Credentials,
+		ClientID:    dbConfig.ClientID,
+		CreatedAt:   dbConfig.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   dbConfig.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 
-	// Decrypt credentials
-	if err := cim.decryptCredentials(&config, clientID); err != nil {
-		cim.logger.Warning("Failed to decrypt credentials", map[string]interface{}{
-			"component":   "client_integration",
-			"client_id":   clientID,
-			"integration": integrationName,
-			"error":      err.Error(),
-		})
-	}
-
-	return &config, nil
+	return config, nil
 }
 
 // SaveClientIntegrationConfig saves a client's configuration for an integration
@@ -84,43 +80,17 @@ func (cim *ClientIntegrationManager) SaveClientIntegrationConfig(clientID string
 	cim.mutex.Lock()
 	defer cim.mutex.Unlock()
 
-	// Ensure the client integration directory exists
-	configDir := filepath.Join(cim.clientsPath, clientID, "integrations", "configs")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		return fmt.Errorf("failed to create integration config directory: %v", err)
+	// Convert to database model
+	dbConfig := &DBClientIntegrationConfig{
+		ClientID:        clientID,
+		IntegrationName: config.Name,
+		Enabled:         config.Enabled,
+		Config:          config.Config,
+		Credentials:     config.Credentials,
 	}
 
-	// Set metadata
-	config.ClientID = clientID
-	if config.CreatedAt == "" {
-		config.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-	}
-	config.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-	// Encrypt credentials before saving
-	encryptedConfig := *config
-	if err := cim.encryptCredentials(&encryptedConfig, clientID); err != nil {
-		return fmt.Errorf("failed to encrypt credentials: %v", err)
-	}
-
-	// Marshal and save
-	data, err := json.MarshalIndent(encryptedConfig, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal integration config: %v", err)
-	}
-
-	configPath := filepath.Join(configDir, config.Name+".json")
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write integration config: %v", err)
-	}
-
-	cim.logger.Info("Client integration config saved", map[string]interface{}{
-		"component":   "client_integration",
-		"client_id":   clientID,
-		"integration": config.Name,
-	})
-
-	return nil
+	// Use the hybrid ConfigManager to save
+	return cim.configManager.SaveClientIntegrationConfig(dbConfig)
 }
 
 // ListClientIntegrations lists all configured integrations for a client
@@ -128,51 +98,25 @@ func (cim *ClientIntegrationManager) ListClientIntegrations(clientID string) ([]
 	cim.mutex.RLock()
 	defer cim.mutex.RUnlock()
 
-	configDir := filepath.Join(cim.clientsPath, clientID, "integrations", "configs")
-	
-	// Check if directory exists
-	if _, err := os.Stat(configDir); os.IsNotExist(err) {
-		return []*ClientIntegrationConfig{}, nil
-	}
-
-	files, err := filepath.Glob(filepath.Join(configDir, "*.json"))
+	// Use the hybrid ConfigManager to list integrations
+	dbConfigs, err := cim.configManager.ListClientIntegrations(clientID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list integration configs: %v", err)
+		return nil, fmt.Errorf("failed to list client integrations: %v", err)
 	}
 
+	// Convert from database model to the existing ClientIntegrationConfig format
 	var configs []*ClientIntegrationConfig
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			cim.logger.Warning("Failed to read integration config", map[string]interface{}{
-				"component": "client_integration",
-				"file":      file,
-				"error":     err.Error(),
-			})
-			continue
+	for _, dbConfig := range dbConfigs {
+		config := &ClientIntegrationConfig{
+			Name:        dbConfig.IntegrationName,
+			Enabled:     dbConfig.Enabled,
+			Config:      dbConfig.Config,
+			Credentials: dbConfig.Credentials,
+			ClientID:    dbConfig.ClientID,
+			CreatedAt:   dbConfig.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:   dbConfig.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		}
-
-		var config ClientIntegrationConfig
-		if err := json.Unmarshal(data, &config); err != nil {
-			cim.logger.Warning("Failed to unmarshal integration config", map[string]interface{}{
-				"component": "client_integration",
-				"file":      file,
-				"error":     err.Error(),
-			})
-			continue
-		}
-
-		// Decrypt credentials
-		if err := cim.decryptCredentials(&config, clientID); err != nil {
-			cim.logger.Warning("Failed to decrypt credentials", map[string]interface{}{
-				"component":   "client_integration",
-				"client_id":   clientID,
-				"integration": config.Name,
-				"error":      err.Error(),
-			})
-		}
-
-		configs = append(configs, &config)
+		configs = append(configs, config)
 	}
 
 	return configs, nil
@@ -183,22 +127,8 @@ func (cim *ClientIntegrationManager) DeleteClientIntegrationConfig(clientID, int
 	cim.mutex.Lock()
 	defer cim.mutex.Unlock()
 
-	configPath := filepath.Join(cim.clientsPath, clientID, "integrations", "configs", integrationName+".json")
-	
-	if err := os.Remove(configPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("integration config not found for client %s: %s", clientID, integrationName)
-		}
-		return fmt.Errorf("failed to delete integration config: %v", err)
-	}
-
-	cim.logger.Info("Client integration config deleted", map[string]interface{}{
-		"component":   "client_integration",
-		"client_id":   clientID,
-		"integration": integrationName,
-	})
-
-	return nil
+	// Use the hybrid ConfigManager to delete
+	return cim.configManager.DeleteClientIntegrationConfig(clientID, integrationName)
 }
 
 // ValidateClientConfig validates a client's integration configuration against the global integration
@@ -225,75 +155,3 @@ func (cim *ClientIntegrationManager) ValidateClientConfig(config *ClientIntegrat
 	return nil
 }
 
-// Helper functions for encryption/decryption
-
-func (cim *ClientIntegrationManager) encryptCredentials(config *ClientIntegrationConfig, clientID string) error {
-	if config.Credentials == nil || len(config.Credentials) == 0 {
-		return nil
-	}
-
-	// Get client's encryption key
-	keyPath := filepath.Join(cim.clientsPath, clientID, ".encryption_key")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read encryption key: %v", err)
-	}
-
-	// Encrypt each credential field
-	encryptedCreds := make(map[string]interface{})
-	for key, value := range config.Credentials {
-		valueStr, ok := value.(string)
-		if !ok {
-			encryptedCreds[key] = value
-			continue
-		}
-
-		encrypted, err := cim.encryptor.Encrypt([]byte(valueStr), string(keyData))
-		if err != nil {
-			return fmt.Errorf("failed to encrypt credential '%s': %v", key, err)
-		}
-		encryptedCreds[key] = encrypted
-	}
-
-	config.Credentials = encryptedCreds
-	return nil
-}
-
-func (cim *ClientIntegrationManager) decryptCredentials(config *ClientIntegrationConfig, clientID string) error {
-	if config.Credentials == nil || len(config.Credentials) == 0 {
-		return nil
-	}
-
-	// Get client's encryption key
-	keyPath := filepath.Join(cim.clientsPath, clientID, ".encryption_key")
-	keyData, err := os.ReadFile(keyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read encryption key: %v", err)
-	}
-
-	// Decrypt each credential field
-	decryptedCreds := make(map[string]interface{})
-	for key, value := range config.Credentials {
-		valueStr, ok := value.(string)
-		if !ok {
-			decryptedCreds[key] = value
-			continue
-		}
-
-		// Check if it looks like an encrypted value
-		if len(valueStr) > 0 && (len(valueStr)%4 == 0 || strings.Contains(valueStr, "=")) {
-			decrypted, err := cim.encryptor.Decrypt([]byte(valueStr), string(keyData))
-			if err != nil {
-				// If decryption fails, keep original value
-				decryptedCreds[key] = value
-			} else {
-				decryptedCreds[key] = string(decrypted)
-			}
-		} else {
-			decryptedCreds[key] = value
-		}
-	}
-
-	config.Credentials = decryptedCreds
-	return nil
-}

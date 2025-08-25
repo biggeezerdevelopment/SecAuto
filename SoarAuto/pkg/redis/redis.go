@@ -442,3 +442,8 @@ func (r *RedisClient) DeleteList(listName string) types.ListResponse {
 func (r *RedisClient) Close() error {
 	return r.client.Close()
 }
+
+// GetClient returns the underlying Redis client for advanced operations
+func (r *RedisClient) GetClient() *redis.Client {
+	return r.client
+}
