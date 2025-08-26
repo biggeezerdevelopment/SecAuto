@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,7 +37,7 @@ type Engine struct {
 	cache                    types.ContextCache
 	integrationManager       *integrations.IntegrationManager
 	clientIntegrationManager *integrations.ClientIntegrationManager
-	
+
 	// Pre-compiled regular expressions for better performance
 	templateVarRegex    *regexp.Regexp
 	templateStringRegex *regexp.Regexp
@@ -53,26 +54,26 @@ func NewEngine(cfg *config.Config) *Engine {
 		EnableExpressionCache: cfg.RulesEngine.Caching.EnableExpressionCache,
 		MaxFieldSize:          cfg.RulesEngine.Caching.MaxFieldSize,
 	}
-	
+
 	// Parse duration strings
 	if contextTTL, err := time.ParseDuration(cfg.RulesEngine.Caching.ContextTTL); err == nil {
 		cacheConfig.ContextTTL = contextTTL
 	} else {
 		cacheConfig.ContextTTL = 30 * time.Minute // Default
 	}
-	
+
 	if exprTTL, err := time.ParseDuration(cfg.RulesEngine.Caching.ExpressionTTL); err == nil {
 		cacheConfig.ExpressionTTL = exprTTL
 	} else {
 		cacheConfig.ExpressionTTL = 15 * time.Minute // Default
 	}
-	
+
 	if varTTL, err := time.ParseDuration(cfg.RulesEngine.Caching.VariableTTL); err == nil {
 		cacheConfig.VariableTTL = varTTL
 	} else {
 		cacheConfig.VariableTTL = 10 * time.Minute // Default
 	}
-	
+
 	if cleanupInterval, err := time.ParseDuration(cfg.RulesEngine.Caching.CleanupInterval); err == nil {
 		cacheConfig.CleanupInterval = cleanupInterval
 	} else {
@@ -84,7 +85,7 @@ func NewEngine(cfg *config.Config) *Engine {
 		context:       make(map[string]interface{}),
 		pluginManager: nil, // Will be set by SetPluginManager
 		cache:         cache.NewContextCache(cacheConfig),
-		
+
 		// Pre-compile regular expressions for better performance
 		templateVarRegex:    regexp.MustCompile(`^\{\{([^}]+)\}\}$`),
 		templateStringRegex: regexp.MustCompile(`\{\{([^}]+)\}\}`),
@@ -148,13 +149,13 @@ func (re *Engine) EvaluateRule(rule interface{}) (interface{}, error) {
 // EvaluatePlaybook evaluates a playbook (sequence of rules)
 func (re *Engine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error) {
 	var results []interface{}
-	
+
 	// Create a mutable copy of the context for this playbook execution
 	playbookContext := make(map[string]interface{})
 	for k, v := range re.context {
 		playbookContext[k] = v
 	}
-	
+
 	for i, rule := range playbook {
 		result, err := re.evaluate(rule, playbookContext)
 		if err != nil {
@@ -162,33 +163,33 @@ func (re *Engine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error
 			if stopErr, ok := err.(*PlaybookStopError); ok {
 				// Add error information to results
 				errorResult := map[string]interface{}{
-					"success":     false,
-					"error":       true,
-					"message":     stopErr.Message,
-					"stopped_at":  i,
-					"timestamp":   time.Now().UTC().Format(time.RFC3339),
+					"success":    false,
+					"error":      true,
+					"message":    stopErr.Message,
+					"stopped_at": i,
+					"timestamp":  time.Now().UTC().Format(time.RFC3339),
 				}
 				results = append(results, errorResult)
-				
+
 				// Return success but with error information indicating failure
 				return results, nil
 			}
-			
+
 			// For other errors, return as before
 			return results, fmt.Errorf("error in rule %d: %v", i, err)
 		}
-		
+
 		results = append(results, result)
-		
+
 		// Handle special rule results that modify context
 		if ruleMap, ok := rule.(map[string]interface{}); ok {
-			// If this is a 'var' operation, update the context
+			// If this rule has a 'var' field, update the context with the result
 			if varName, exists := ruleMap["var"]; exists {
 				if varNameStr, ok := varName.(string); ok {
 					playbookContext[varNameStr] = result
 				}
 			}
-			
+
 			// If this is a 'run' operation, merge script results into context
 			if _, isRunOperation := ruleMap["run"]; isRunOperation {
 				if resultMap, ok := result.(map[string]interface{}); ok {
@@ -200,7 +201,7 @@ func (re *Engine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error
 			}
 		}
 	}
-	
+
 	return results, nil
 }
 
@@ -217,12 +218,12 @@ func (re *Engine) evaluate(expr interface{}, data map[string]interface{}) (inter
 
 	// Process template variables first
 	processedExpr := re.processTemplateVariables(expr, data)
-	
+
 	result, err := re.evaluateExpression(processedExpr, data)
-	
+
 	// Store result in cache
 	re.cache.StoreExpression(exprHash, result, err)
-	
+
 	return result, err
 }
 
@@ -248,6 +249,8 @@ func (re *Engine) evaluateExpression(processedExpr interface{}, data map[string]
 				return re.evaluateVarOperation(value, data)
 			case "error":
 				return re.evaluateErrorOperation(value, data)
+			case "math":
+				return re.evaluateMathOperation(value, data)
 			default:
 				// Check for comparison or logical operations
 				if re.isComparisonOp(key) {
@@ -309,30 +312,30 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 
 	// Process template variables in script name
 	processedScriptName := re.processStringTemplate(scriptNameStr, data)
-	
+
 	// Get full path to script
 	scriptPath := re.getScriptPath(processedScriptName)
-	
+
 	// Check if script exists
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("script not found: %s", scriptPath)
 	}
-	
+
 	// Check if this should run in integration context
 	if integrationName, hasIntegration := operation["run_i"]; hasIntegration {
 		log.Printf("Found run_i parameter: %v, executing in integration context", integrationName)
 		// Execute in integration context
 		return re.executeInIntegrationContext(processedScriptName, integrationName, operation, data)
 	}
-	
+
 	// Process additional parameters from the operation and merge with context
 	enhancedData := make(map[string]interface{})
-	
+
 	// Copy original context
 	for k, v := range data {
 		enhancedData[k] = v
 	}
-	
+
 	// Process additional parameters (everything except "run" and "run_i")
 	for key, value := range operation {
 		if key != "run" && key != "run_i" {
@@ -341,7 +344,7 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 			enhancedData[key] = processedValue
 		}
 	}
-	
+
 	// Execute the script with enhanced context
 	return re.executeScript(scriptPath, enhancedData)
 }
@@ -355,18 +358,18 @@ func (re *Engine) evaluatePlayOperation(playbookName interface{}, data map[strin
 
 	// Process template variables
 	processedPlaybookName := re.processStringTemplate(playbookNameStr, data)
-	
+
 	// Auto-append .json extension if not present
 	if !strings.HasSuffix(processedPlaybookName, ".json") {
 		processedPlaybookName += ".json"
 	}
-	
+
 	// Load and execute playbook
 	playbook, err := re.LoadPlaybookFromFile(re.getPlaybookPath(processedPlaybookName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load playbook %s: %v", processedPlaybookName, err)
 	}
-	
+
 	return re.EvaluatePlaybook(playbook)
 }
 
@@ -457,7 +460,7 @@ func (re *Engine) processTemplateVariables(value interface{}, data map[string]in
 		// Check if the string is exactly a template variable (e.g. "{{threat_intelligence.domains}}")
 		if matches := re.templateVarRegex.FindStringSubmatch(v); len(matches) == 2 {
 			variableName := strings.TrimSpace(matches[1])
-			
+
 			// Try direct lookup
 			if resolved, exists := data[variableName]; exists {
 				return resolved
@@ -466,11 +469,11 @@ func (re *Engine) processTemplateVariables(value interface{}, data map[string]in
 			if resolved, err := re.evaluateDotNotation(variableName, data); err == nil && resolved != nil {
 				return resolved
 			}
-			
+
 			// Return the original string if can't resolve
 			return v
 		}
-		
+
 		// Process template strings like "Hello {{name}}"
 		return re.processStringTemplate(v, data)
 	case map[string]interface{}:
@@ -526,12 +529,12 @@ func (re *Engine) processStringTemplate(template string, data map[string]interfa
 func (re *Engine) evaluateDotNotation(path string, data map[string]interface{}) (interface{}, error) {
 	parts := strings.Split(path, ".")
 	var current interface{} = data
-	
+
 	for i, part := range parts {
 		if current == nil {
 			return nil, fmt.Errorf("cannot access property '%s' of null at path '%s'", part, strings.Join(parts[:i], "."))
 		}
-		
+
 		switch v := current.(type) {
 		case map[string]interface{}:
 			if val, exists := v[part]; exists {
@@ -553,7 +556,7 @@ func (re *Engine) evaluateDotNotation(path string, data map[string]interface{}) 
 			return nil, fmt.Errorf("cannot access property '%s' of non-object", part)
 		}
 	}
-	
+
 	return nil, fmt.Errorf("empty path")
 }
 
@@ -597,7 +600,7 @@ func (re *Engine) evaluateIfOperation(ifExpr interface{}, data map[string]interf
 	}
 }
 
-// evaluateVarOperation handles 'var' operations  
+// evaluateVarOperation handles 'var' operations
 func (re *Engine) evaluateVarOperation(varName interface{}, data map[string]interface{}) (interface{}, error) {
 	varNameStr, ok := varName.(string)
 	if !ok {
@@ -609,7 +612,7 @@ func (re *Engine) evaluateVarOperation(varName interface{}, data map[string]inte
 		lazyVar := re.cache.GetOrCreateLazyVariable(varNameStr, varNameStr, func() (interface{}, error) {
 			return re.evaluateDotNotation(varNameStr, data)
 		})
-		
+
 		return lazyVar.Evaluate()
 	}
 
@@ -621,7 +624,7 @@ func (re *Engine) evaluateVarOperation(varName interface{}, data map[string]inte
 func (re *Engine) evaluateErrorOperation(errorValue interface{}, data map[string]interface{}) (interface{}, error) {
 	// Process template variables in the error message
 	processedErrorValue := re.processTemplateVariables(errorValue, data)
-	
+
 	// Convert to string if needed
 	var errorMessage string
 	switch v := processedErrorValue.(type) {
@@ -630,9 +633,189 @@ func (re *Engine) evaluateErrorOperation(errorValue interface{}, data map[string
 	default:
 		errorMessage = fmt.Sprintf("%v", v)
 	}
-	
+
 	// Return a special error that indicates playbook should stop
 	return nil, &PlaybookStopError{Message: errorMessage}
+}
+
+// evaluateMathOperation handles 'math' operations
+func (re *Engine) evaluateMathOperation(mathExpr interface{}, data map[string]interface{}) (interface{}, error) {
+	// Parse math expression structure
+	mathMap, ok := mathExpr.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("math expression must be an object")
+	}
+
+	// Get operation type
+	operation, exists := mathMap["operation"]
+	if !exists {
+		return nil, fmt.Errorf("math expression must specify an operation")
+	}
+
+	operationStr, ok := operation.(string)
+	if !ok {
+		return nil, fmt.Errorf("math operation must be a string")
+	}
+
+	// Get operands
+	operands, exists := mathMap["operands"]
+	if !exists {
+		return nil, fmt.Errorf("math expression must specify operands")
+	}
+
+	// Evaluate operands
+	evaluatedOperands, err := re.evaluateMathOperands(operands, data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Perform calculation
+	return re.performMathCalculation(operationStr, evaluatedOperands)
+}
+
+// evaluateMathOperands evaluates and converts operands to numeric values
+func (re *Engine) evaluateMathOperands(operands interface{}, data map[string]interface{}) ([]float64, error) {
+	operandArray, ok := operands.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("math operands must be an array")
+	}
+
+	var result []float64
+	for i, operand := range operandArray {
+		// Evaluate the operand (handles {{variables}} and {"var": "path"})
+		evaluated, err := re.evaluate(operand, data)
+		if err != nil {
+			return nil, fmt.Errorf("error evaluating operand %d: %v", i, err)
+		}
+
+		// Convert to float64
+		numValue, ok := re.toFloat64(evaluated)
+		if !ok {
+			return nil, fmt.Errorf("operand %d is not numeric: %v", i, evaluated)
+		}
+
+		result = append(result, numValue)
+	}
+
+	return result, nil
+}
+
+// performMathCalculation performs the actual mathematical operation
+func (re *Engine) performMathCalculation(operation string, operands []float64) (float64, error) {
+	if len(operands) == 0 {
+		return 0, fmt.Errorf("no operands provided")
+	}
+
+	switch operation {
+	case "add", "sum":
+		result := operands[0]
+		for i := 1; i < len(operands); i++ {
+			result += operands[i]
+		}
+		return result, nil
+
+	case "subtract", "sub":
+		if len(operands) < 2 {
+			return 0, fmt.Errorf("subtract requires at least 2 operands")
+		}
+		result := operands[0]
+		for i := 1; i < len(operands); i++ {
+			result -= operands[i]
+		}
+		return result, nil
+
+	case "multiply", "mul":
+		result := operands[0]
+		for i := 1; i < len(operands); i++ {
+			result *= operands[i]
+		}
+		return result, nil
+
+	case "divide", "div":
+		if len(operands) != 2 {
+			return 0, fmt.Errorf("divide requires exactly 2 operands")
+		}
+		if operands[1] == 0 {
+			return 0, fmt.Errorf("division by zero")
+		}
+		return operands[0] / operands[1], nil
+
+	case "power", "pow":
+		if len(operands) != 2 {
+			return 0, fmt.Errorf("power requires exactly 2 operands")
+		}
+		return math.Pow(operands[0], operands[1]), nil
+
+	case "mod", "modulo":
+		if len(operands) != 2 {
+			return 0, fmt.Errorf("modulo requires exactly 2 operands")
+		}
+		if operands[1] == 0 {
+			return 0, fmt.Errorf("modulo by zero")
+		}
+		return math.Mod(operands[0], operands[1]), nil
+
+	case "min":
+		result := operands[0]
+		for i := 1; i < len(operands); i++ {
+			if operands[i] < result {
+				result = operands[i]
+			}
+		}
+		return result, nil
+
+	case "max":
+		result := operands[0]
+		for i := 1; i < len(operands); i++ {
+			if operands[i] > result {
+				result = operands[i]
+			}
+		}
+		return result, nil
+
+	case "avg", "average":
+		sum := 0.0
+		for _, operand := range operands {
+			sum += operand
+		}
+		return sum / float64(len(operands)), nil
+
+	case "abs", "absolute":
+		if len(operands) != 1 {
+			return 0, fmt.Errorf("absolute requires exactly 1 operand")
+		}
+		return math.Abs(operands[0]), nil
+
+	case "sqrt", "square_root":
+		if len(operands) != 1 {
+			return 0, fmt.Errorf("square root requires exactly 1 operand")
+		}
+		if operands[0] < 0 {
+			return 0, fmt.Errorf("square root of negative number")
+		}
+		return math.Sqrt(operands[0]), nil
+
+	case "ceil", "ceiling":
+		if len(operands) != 1 {
+			return 0, fmt.Errorf("ceiling requires exactly 1 operand")
+		}
+		return math.Ceil(operands[0]), nil
+
+	case "floor":
+		if len(operands) != 1 {
+			return 0, fmt.Errorf("floor requires exactly 1 operand")
+		}
+		return math.Floor(operands[0]), nil
+
+	case "round":
+		if len(operands) != 1 {
+			return 0, fmt.Errorf("round requires exactly 1 operand")
+		}
+		return math.Round(operands[0]), nil
+
+	default:
+		return 0, fmt.Errorf("unknown math operation: %s", operation)
+	}
 }
 
 // evaluateComparison handles comparison operations
@@ -683,21 +866,21 @@ func (re *Engine) evaluateLogical(operation map[string]interface{}, op string, d
 			return false, fmt.Errorf("and operation requires operands")
 		}
 		return re.evaluateAnd(operands, data)
-		
+
 	case "or":
 		operands, exists := operation["or"]
 		if !exists {
 			return false, fmt.Errorf("or operation requires operands")
 		}
 		return re.evaluateOr(operands, data)
-		
+
 	case "not":
 		operand, exists := operation["not"]
 		if !exists {
 			return false, fmt.Errorf("not operation requires operand")
 		}
 		return re.evaluateNot(operand, data)
-		
+
 	default:
 		return false, fmt.Errorf("unknown logical operator: %s", op)
 	}
@@ -735,7 +918,7 @@ func (re *Engine) deepEqual(left, right interface{}) bool {
 	if left == nil || right == nil {
 		return false
 	}
-	
+
 	switch leftVal := left.(type) {
 	case string:
 		if rightVal, ok := right.(string); ok {
@@ -785,7 +968,7 @@ func (re *Engine) deepEqual(left, right interface{}) bool {
 			return true
 		}
 	}
-	
+
 	return left == right
 }
 
@@ -793,11 +976,11 @@ func (re *Engine) deepEqual(left, right interface{}) bool {
 func (re *Engine) compareNumeric(left, right interface{}, op string) (bool, error) {
 	leftFloat, leftOk := re.toFloat64(left)
 	rightFloat, rightOk := re.toFloat64(right)
-	
+
 	if !leftOk || !rightOk {
 		return false, fmt.Errorf("cannot compare non-numeric values")
 	}
-	
+
 	switch op {
 	case ">":
 		return leftFloat > rightFloat, nil
@@ -853,7 +1036,7 @@ func (re *Engine) isTruthy(value interface{}) bool {
 	if value == nil {
 		return false
 	}
-	
+
 	switch v := value.(type) {
 	case bool:
 		return v
@@ -878,7 +1061,7 @@ func (re *Engine) evaluateAnd(operands interface{}, data map[string]interface{})
 	if !ok {
 		return false, fmt.Errorf("and operands must be an array")
 	}
-	
+
 	for _, operand := range operandArray {
 		result, err := re.evaluate(operand, data)
 		if err != nil {
@@ -897,7 +1080,7 @@ func (re *Engine) evaluateOr(operands interface{}, data map[string]interface{}) 
 	if !ok {
 		return false, fmt.Errorf("or operands must be an array")
 	}
-	
+
 	for _, operand := range operandArray {
 		result, err := re.evaluate(operand, data)
 		if err != nil {
@@ -931,54 +1114,54 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 			pythonPath = re.config.Python.VenvPath + "/Scripts/python.exe"
 		}
 	}
-	
+
 	// Prepare context as JSON for the script
 	contextJSON, err := json.Marshal(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal context: %v", err)
 	}
-	
+
 	// Create command with timeout
 	timeout := time.Duration(re.config.Python.ScriptTimeout) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second // 5 minute default
 	}
-	
+
 	// Create the command
 	cmd := exec.Command(pythonPath, scriptPath)
-	
+
 	// Set environment variables
 	// Set INTEGRATION_NAME=default to enable sitecustomize.py function injection
-	cmd.Env = append(os.Environ(), 
+	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)),
 		"INTEGRATION_NAME=default",
 	)
-	
+
 	// Add server directory to Python path for fallback imports
 	serverDir := "server"
 	if _, err := os.Stat(serverDir); err == nil {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("PYTHONPATH=%s", serverDir))
 	}
-	
+
 	// Prepare stdin with context data
 	cmd.Stdin = bytes.NewReader(contextJSON)
-	
+
 	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	// Start the command
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start script %s: %v", scriptPath, err)
 	}
-	
+
 	// Wait with timeout
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -988,7 +1171,7 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("script %s timed out after %v", scriptPath, timeout)
 	}
-	
+
 	// Parse the output
 	outputStr := strings.TrimSpace(stdout.String())
 	if outputStr == "" {
@@ -1001,7 +1184,7 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 			"stderr":    stderr.String(),
 		}, nil
 	}
-	
+
 	// Try to parse as JSON
 	var result interface{}
 	if err := json.Unmarshal([]byte(outputStr), &result); err != nil {
@@ -1014,55 +1197,55 @@ func (re *Engine) executeScript(scriptPath string, data map[string]interface{}) 
 			"stderr":    stderr.String(),
 		}, nil
 	}
-	
+
 	return result, nil
 }
 
 // executeInIntegrationContext executes a script in the context of a specific integration
 func (re *Engine) executeInIntegrationContext(scriptName string, integrationName interface{}, operation map[string]interface{}, data map[string]interface{}) (interface{}, error) {
 	log.Printf("executeInIntegrationContext called with script: %s, integration: %v", scriptName, integrationName)
-	
+
 	// Check if integration managers are available
 	if re.integrationManager == nil || re.clientIntegrationManager == nil {
 		log.Printf("Integration managers not available: manager=%v, clientManager=%v", re.integrationManager != nil, re.clientIntegrationManager != nil)
 		return nil, fmt.Errorf("integration managers not available")
 	}
-	
+
 	// Convert integration name to string
 	integrationNameStr, ok := integrationName.(string)
 	if !ok {
 		return nil, fmt.Errorf("integration name must be a string")
 	}
-	
+
 	// Get client_id from context
 	clientID, exists := data["client_id"]
 	if !exists {
 		return nil, fmt.Errorf("client_id required for integration context execution")
 	}
-	
+
 	clientIDStr, ok := clientID.(string)
 	if !ok {
 		return nil, fmt.Errorf("client_id must be a string")
 	}
-	
+
 	// Get client integration configuration
 	clientConfig, err := re.clientIntegrationManager.GetClientIntegrationConfig(clientIDStr, integrationNameStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get client integration config: %v", err)
 	}
-	
+
 	if clientConfig == nil {
 		return nil, fmt.Errorf("integration '%s' not configured for client '%s'", integrationNameStr, clientIDStr)
 	}
-	
+
 	// Process additional parameters for the automation context
 	automationData := make(map[string]interface{})
-	
+
 	// Copy original context
 	for k, v := range data {
 		automationData[k] = v
 	}
-	
+
 	// Add configuration parameters (everything except "run" and "run_i")
 	for key, value := range operation {
 		if key != "run" && key != "run_i" {
@@ -1070,7 +1253,7 @@ func (re *Engine) executeInIntegrationContext(scriptName string, integrationName
 			automationData[key] = processedValue
 		}
 	}
-	
+
 	// Execute the automation using integration execution with custom function
 	// The automation script will be executed in the integration's Python environment
 	// and will have access to the integration loader
@@ -1084,92 +1267,92 @@ func (re *Engine) executeAutomationInIntegrationContext(scriptName, integrationN
 	if err != nil {
 		return nil, fmt.Errorf("failed to get integration definition: %v", err)
 	}
-	
+
 	// Check if integration environment needs to be built
 	isBuilt := re.integrationManager.IsIntegrationBuilt(integrationName)
 	log.Printf("Integration %s: RequiresBuild=%v, IsBuilt=%v", integrationName, definition.Backend.RequiresBuild, isBuilt)
-	
+
 	if definition.Backend.RequiresBuild && !isBuilt {
 		log.Printf("Integration environment not built for: %s", integrationName)
 		return nil, fmt.Errorf("integration environment not built for '%s'. Please build the integration environment first", integrationName)
 	}
-	
+
 	// Get the automation script path (in automations directory, not integration scripts)
 	automationScriptPath := re.getScriptPath(scriptName)
-	
+
 	// Check if automation script exists
 	if _, err := os.Stat(automationScriptPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("automation script not found: %s", automationScriptPath)
 	}
-	
+
 	// Prepare the context for the automation
 	// This includes the integration configuration and automation-specific data
 	context := map[string]interface{}{
-		"client_id":         automationData["client_id"],
-		"integration_name":  integrationName,
+		"client_id":          automationData["client_id"],
+		"integration_name":   integrationName,
 		"integration_config": clientConfig.Config,
-		"credentials":       clientConfig.Credentials,
-		"config":           automationData, // Pass all automation parameters
+		"credentials":        clientConfig.Credentials,
+		"config":             automationData, // Pass all automation parameters
 	}
-	
+
 	contextJSON, err := json.Marshal(context)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal automation context: %v", err)
 	}
-	
+
 	// Use the integration's Python environment
 	pythonPath := "python3" // Default
 	if definition.Backend.Type == "python" {
 		// Use the UV virtual environment for the integration
 		venvPath := fmt.Sprintf("data/integrations/venvs/%s", integrationName)
 		uvPythonPath := filepath.Join(venvPath, "bin", "python")
-		
+
 		// Check if the UV virtual environment exists
 		if _, err := os.Stat(uvPythonPath); err == nil {
 			pythonPath = uvPythonPath
 		}
 	}
-	
+
 	// Create the command with timeout
 	timeout := time.Duration(re.config.Python.ScriptTimeout) * time.Second
 	if timeout == 0 {
 		timeout = 300 * time.Second // 5 minute default
 	}
-	
+
 	// Execute the automation script
 	cmd := exec.Command(pythonPath, automationScriptPath)
-	
+
 	// Set up environment for integration context
-	env := append(os.Environ(), 
+	env := append(os.Environ(),
 		fmt.Sprintf("SECAUTO_CONTEXT=%s", string(contextJSON)),
 		fmt.Sprintf("INTEGRATION_NAME=%s", integrationName),
 	)
-	
+
 	// Add server directory to Python path for secauto_base imports (fallback)
 	serverDir := "server"
 	if _, err := os.Stat(serverDir); err == nil {
 		env = append(env, fmt.Sprintf("PYTHONPATH=%s", serverDir))
 	}
-	
+
 	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(contextJSON)
-	
+
 	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	// Start the command
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start automation script %s: %v", automationScriptPath, err)
 	}
-	
+
 	// Wait with timeout
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1179,7 +1362,7 @@ func (re *Engine) executeAutomationInIntegrationContext(scriptName, integrationN
 		cmd.Process.Kill()
 		return nil, fmt.Errorf("automation script timed out after %v", timeout)
 	}
-	
+
 	// Parse the output as JSON if possible
 	outputStr := strings.TrimSpace(stdout.String())
 	if outputStr == "" {
@@ -1191,7 +1374,7 @@ func (re *Engine) executeAutomationInIntegrationContext(scriptName, integrationN
 			"stderr":    stderr.String(),
 		}, nil
 	}
-	
+
 	// Try to parse as JSON
 	var result interface{}
 	if err := json.Unmarshal([]byte(outputStr), &result); err != nil {
@@ -1204,6 +1387,6 @@ func (re *Engine) executeAutomationInIntegrationContext(scriptName, integrationN
 			"stderr":    stderr.String(),
 		}, nil
 	}
-	
+
 	return result, nil
 }

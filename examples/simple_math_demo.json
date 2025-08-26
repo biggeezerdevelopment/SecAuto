@@ -1,0 +1,119 @@
+[
+  {
+    "comment": "Math Operations Demo - Successfully Implemented!"
+  },
+  {
+    "comment": "Initialize threat scores"
+  },
+  {
+    "var": "virustotal_score",
+    "value": 85
+  },
+  {
+    "var": "abuseipdb_score", 
+    "value": 72
+  },
+  {
+    "var": "internal_score",
+    "value": 68
+  },
+  {
+    "comment": "Calculate total threat score using math operation"
+  },
+  {
+    "math": {
+      "operation": "add",
+      "operands": [
+        {"var": "virustotal_score"},
+        {"var": "abuseipdb_score"},
+        {"var": "internal_score"}
+      ]
+    },
+    "var": "total_score"
+  },
+  {
+    "comment": "Calculate average threat score"
+  },
+  {
+    "math": {
+      "operation": "average",
+      "operands": [
+        {"var": "virustotal_score"},
+        {"var": "abuseipdb_score"},
+        {"var": "internal_score"}
+      ]
+    },
+    "var": "average_score"
+  },
+  {
+    "comment": "Find maximum individual score"
+  },
+  {
+    "math": {
+      "operation": "max",
+      "operands": [
+        {"var": "virustotal_score"},
+        {"var": "abuseipdb_score"},
+        {"var": "internal_score"}
+      ]
+    },
+    "var": "max_score"
+  },
+  {
+    "comment": "Apply threat multiplier"
+  },
+  {
+    "math": {
+      "operation": "multiply",
+      "operands": [
+        {"var": "average_score"},
+        1.2
+      ]
+    },
+    "var": "weighted_score"
+  },
+  {
+    "comment": "Round the final score"
+  },
+  {
+    "math": {
+      "operation": "round",
+      "operands": [
+        {"var": "weighted_score"}
+      ]
+    },
+    "var": "final_score"
+  },
+  {
+    "comment": "Conditional logic based on calculated score"
+  },
+  {
+    "if": {
+      "condition": {
+        ">": [{"var": "final_score"}, 80]
+      },
+      "then": {
+        "var": "threat_level",
+        "value": "HIGH"
+      },
+      "else": {
+        "var": "threat_level",
+        "value": "MEDIUM"
+      }
+    }
+  },
+  {
+    "comment": "Final results summary"
+  },
+  {
+    "var": "summary",
+    "value": {
+      "total": "{{total_score}}",
+      "average": "{{average_score}}",
+      "max": "{{max_score}}",
+      "weighted": "{{weighted_score}}",
+      "final": "{{final_score}}",
+      "threat_level": "{{threat_level}}"
+    }
+  }
+]
