@@ -47,6 +47,32 @@ check_uv() {
     fi
 }
 
+# Check and ensure Python 3.12 is available
+check_python() {
+    log_info "Checking for Python 3.12..."
+    
+    # Check if Python 3.12 is already available
+    if command -v python3.12 &> /dev/null; then
+        log_success "Python 3.12 found: $(python3.12 --version)"
+        PYTHON_VERSION="3.12"
+    else
+        log_warning "Python 3.12 not found on system"
+        log_info "Installing Python 3.12 using uv..."
+        
+        # Use uv to install Python 3.12
+        uv python install 3.12
+        
+        if [ $? -eq 0 ]; then
+            log_success "Python 3.12 installed successfully via uv"
+            PYTHON_VERSION="3.12"
+        else
+            log_error "Failed to install Python 3.12"
+            log_info "Falling back to default Python version"
+            PYTHON_VERSION=""
+        fi
+    fi
+}
+
 # Create virtual environment with UV
 create_venv() {
     log_info "Creating virtual environment at: $VENV_PATH"
@@ -56,7 +82,15 @@ create_venv() {
         rm -rf "$VENV_PATH"
     fi
     
-    uv venv "$VENV_PATH"
+    # Create venv with specific Python version if available
+    if [ -n "$PYTHON_VERSION" ]; then
+        log_info "Creating virtual environment with Python $PYTHON_VERSION"
+        uv venv "$VENV_PATH" --python "$PYTHON_VERSION"
+    else
+        log_info "Creating virtual environment with default Python version"
+        uv venv "$VENV_PATH"
+    fi
+    
     log_success "Virtual environment created successfully with UV"
 }
 
@@ -158,6 +192,7 @@ main() {
     log_info "Project root: $PROJECT_ROOT"
     
     check_uv
+    check_python
     create_venv
     install_requirements
     create_activation_script
