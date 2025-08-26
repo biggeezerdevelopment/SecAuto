@@ -169,6 +169,12 @@ create_distribution() {
         cp "SoarAuto/config-production.yaml" "${SCRIPT_DIR}/${PACKAGE_DIR}/config/config-production.yaml.example"
     fi
     
+    # Copy database migrations
+    if [[ -d "SoarAuto/migrations" ]]; then
+        mkdir -p "${SCRIPT_DIR}/${PACKAGE_DIR}/migrations"
+        cp -r SoarAuto/migrations/* "${SCRIPT_DIR}/${PACKAGE_DIR}/migrations/" 2>/dev/null || true
+    fi
+    
     # Step 4: Create necessary directories
     log_info "Creating directory structure..."
     mkdir -p "${SCRIPT_DIR}/${PACKAGE_DIR}/data/automations/metadata"
@@ -223,6 +229,10 @@ create_distribution() {
         # Copy other utility scripts
         cp scripts/migrate_to_uv.py "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
         cp scripts/generate_architecture_graph.py "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
+        
+        # Copy database installation scripts
+        cp scripts/install_postgresql.sh "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
+        cp scripts/init_database.sql "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
     fi
     
     # Step 6: Copy installation scripts
@@ -341,12 +351,24 @@ Build Date: $(date -u +%Y-%m-%d)
 - sdk/ - Python SDK for SecAuto
 - install/ - Installation helper scripts
 
+## Database Setup
+
+For PostgreSQL database setup (recommended for production):
+1. Run the database installation script:
+   \`\`\`bash
+   scripts/install_postgresql.sh --db-name soar_auto --db-user ddfelts
+   \`\`\`
+2. Or manually run the SQL script:
+   \`\`\`bash
+   psql -U postgres -f scripts/init_database.sql
+   \`\`\`
+
 ## Configuration
 
 1. Copy config/config.yaml.example to config/config.yaml
 2. Edit the configuration to match your environment:
    - Set server host and port
-   - Configure database connections
+   - Configure database connections (use PostgreSQL settings from database setup)
    - Set logging preferences
    - Configure security settings
 
