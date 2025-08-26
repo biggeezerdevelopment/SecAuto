@@ -82,29 +82,28 @@ type IntegrationManager struct {
 }
 
 // NewIntegrationManager creates a new integration manager
-func NewIntegrationManager(configsPath, scriptsPath, pythonPath string, logger types.Logger) *IntegrationManager {
+func NewIntegrationManager(configsPath, scriptsPath, builderScriptPath, pythonPath string, logger types.Logger) *IntegrationManager {
 	// Make paths absolute if they're relative
+	workDir, _ := os.Getwd()
+	
 	if !filepath.IsAbs(configsPath) {
-		workDir, _ := os.Getwd()
 		configsPath = filepath.Join(workDir, configsPath)
 	}
 	if !filepath.IsAbs(scriptsPath) {
-		workDir, _ := os.Getwd()
 		scriptsPath = filepath.Join(workDir, scriptsPath)
+	}
+	if !filepath.IsAbs(builderScriptPath) {
+		builderScriptPath = filepath.Join(workDir, builderScriptPath)
 	}
 	
 	baseDir := filepath.Dir(configsPath)
-	
-	// Calculate project root path from current working directory (should be in SoarAuto/)
-	workDir, _ := os.Getwd()
-	projectRoot := filepath.Dir(workDir)
 	
 	im := &IntegrationManager{
 		definitions: make(map[string]*IntegrationDefinition),
 		configsPath: configsPath,
 		scriptsPath: scriptsPath,
 		venvPath:    filepath.Join(baseDir, "venvs"), // Virtual environments directory
-		builderPath: filepath.Join(projectRoot, "scripts", "integration_builder.py"),
+		builderPath: builderScriptPath,
 		pythonPath:  pythonPath,
 		logger:      logger,
 	}

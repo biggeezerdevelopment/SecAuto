@@ -2,6 +2,16 @@
 """
 UV-based Integration Backend Builder
 Simplified, fast integration environment setup using UV
+
+Configuration:
+- Reads integration paths from config.yaml in the SoarAuto directory
+- Supports configurable base_path, configs_path, scripts_path, and venvs_path
+- Falls back to defaults if config.yaml is not found or missing entries
+
+Usage examples:
+  python integration_builder.py list
+  python integration_builder.py build --config path/to/integration.json
+  python integration_builder.py --config-file /custom/config.yaml status
 """
 
 import os
@@ -9,6 +19,7 @@ import sys
 import json
 import subprocess
 import shutil
+import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 import logging
@@ -21,13 +32,16 @@ logger = logging.getLogger(__name__)
 class IntegrationBuilder:
     """Integration builder for fast environment setup"""
     
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: str = None, config_file: str = None):
         """Initialize the integration builder with base paths"""
         self.base_path = Path(base_path or os.getcwd())
-        self.integrations_dir = self.base_path / "SoarAuto" / "data" / "integrations"
-        self.venvs_dir = self.integrations_dir / "venvs"
-        self.scripts_dir = self.integrations_dir / "scripts"
-        self.configs_dir = self.integrations_dir / "configs"
+        
+        # Load configuration from config.yaml
+        self.config = self._load_config(config_file)
+        
+        # Setup paths from configuration
+        self._setup_paths_from_config()
+        
         self.server_dir = self.base_path / "SoarAuto" / "server"
         self.build_status_file = self.integrations_dir / ".uv_build_status.json"
         
@@ -47,6 +61,63 @@ class IntegrationBuilder:
             logger.info(f"UV available: {result.stdout.strip()}")
         except (subprocess.CalledProcessError, FileNotFoundError):
             raise RuntimeError("UV is required but not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh")
+    
+    def _load_config(self, config_file: str = None) -> Dict:
+        """Load configuration from config.yaml"""
+        if config_file is None:
+            config_file = self.base_path / "SoarAuto" / "config.yaml"
+        else:
+            config_file = Path(config_file)
+        
+        try:
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            logger.info(f"Loaded configuration from {config_file}")
+            return config
+        except FileNotFoundError:
+            logger.warning(f"Config file not found: {config_file}, using defaults")
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to load config file {config_file}: {e}")
+            return {}
+    
+    def _setup_paths_from_config(self):
+        """Setup integration paths from configuration"""
+        integrations_config = self.config.get('integrations', {})
+        
+        # Get base integration directory path
+        base_integrations_path = integrations_config.get('base_path', 'data/integrations')
+        
+        # Convert relative paths to absolute paths based on base_path
+        if not os.path.isabs(base_integrations_path):
+            self.integrations_dir = self.base_path / "SoarAuto" / base_integrations_path
+        else:
+            self.integrations_dir = Path(base_integrations_path)
+        
+        # Setup specific directories from config or use defaults
+        configs_path = integrations_config.get('configs_path', 'configs')
+        scripts_path = integrations_config.get('scripts_path', 'scripts')
+        venvs_path = integrations_config.get('venvs_path', 'venvs')
+        
+        # Convert to absolute paths
+        if not os.path.isabs(configs_path):
+            self.configs_dir = self.integrations_dir / configs_path.replace('data/integrations/', '')
+        else:
+            self.configs_dir = Path(configs_path)
+            
+        if not os.path.isabs(scripts_path):
+            self.scripts_dir = self.integrations_dir / scripts_path.replace('data/integrations/', '')
+        else:
+            self.scripts_dir = Path(scripts_path)
+            
+        if not os.path.isabs(venvs_path):
+            self.venvs_dir = self.integrations_dir / venvs_path
+        else:
+            self.venvs_dir = Path(venvs_path)
+        
+        logger.info(f"Integration paths - Base: {self.integrations_dir}, "
+                   f"Configs: {self.configs_dir}, Scripts: {self.scripts_dir}, "
+                   f"Venvs: {self.venvs_dir}")
     
     def build_integration(self, config_path: str) -> Dict:
         """
@@ -437,10 +508,11 @@ def main():
     parser.add_argument("--name", help="Integration name (for clean/status/migrate)")
     parser.add_argument("--base-path", help="Base path for SecAuto", 
                        default="/Volumes/My Shared Files/Home/Downloads/SecAuto")
+    parser.add_argument("--config-file", help="Path to config.yaml file")
     
     args = parser.parse_args()
     
-    builder = IntegrationBuilder(args.base_path)
+    builder = IntegrationBuilder(args.base_path, args.config_file)
     
     if args.action == "build":
         if not args.config:

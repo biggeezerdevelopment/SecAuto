@@ -157,6 +157,7 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 	integrationManager := integrations.NewIntegrationManager(
 		cfg.Integrations.ConfigsPath,
 		cfg.Integrations.ScriptsPath,
+		cfg.Integrations.BuilderScriptPath,
 		pythonPath,
 		lgr,
 	)
@@ -1023,15 +1024,16 @@ func (s *SecAutoServer) triggerIntegrationBuild(configPath string, integrationNa
 		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
 	}
 	
-	// Build path to integration builder script
-	// Calculate project root from current working directory (should be SoarAuto/)
-	workDir, _ := os.Getwd()
-	projectRoot := filepath.Dir(workDir)
-	scriptPath := filepath.Join(projectRoot, "scripts", "integration_builder.py")
+	// Build path to integration builder script from config
+	scriptPath := s.config.Integrations.BuilderScriptPath
+	if !filepath.IsAbs(scriptPath) {
+		workDir, _ := os.Getwd()
+		scriptPath = filepath.Join(workDir, scriptPath)
+	}
 	cmd := exec.Command(pythonPath, scriptPath, "build", "--config", configPath)
 	
-	// Set working directory to project root
-	cmd.Dir = projectRoot
+	// Set working directory to current working directory
+	cmd.Dir, _ = os.Getwd()
 	
 	// Run the command and capture output
 	output, err := cmd.CombinedOutput()
@@ -1087,10 +1089,12 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 		pythonPath = filepath.Join(s.config.Python.VenvPath, "Scripts", "python.exe")
 	}
 	
-	// Build path to integration builder script
-	workDir, _ := os.Getwd()
-	projectRoot := filepath.Dir(workDir)
-	scriptPath := filepath.Join(projectRoot, "scripts", "integration_builder.py")
+	// Build path to integration builder script from config
+	scriptPath := s.config.Integrations.BuilderScriptPath
+	if !filepath.IsAbs(scriptPath) {
+		workDir, _ := os.Getwd()
+		scriptPath = filepath.Join(workDir, scriptPath)
+	}
 	var cmd *exec.Cmd
 	
 	if integrationName != "" {
@@ -1099,8 +1103,8 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 		cmd = exec.Command(pythonPath, scriptPath, "status")
 	}
 	
-	// Set working directory to project root
-	cmd.Dir = projectRoot
+	// Set working directory to current working directory
+	cmd.Dir, _ = os.Getwd()
 	
 	// Run the command
 	output, err := cmd.CombinedOutput()

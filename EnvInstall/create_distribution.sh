@@ -216,6 +216,13 @@ create_distribution() {
         # Copy TLS certificate generation scripts
         cp scripts/generate-certs.sh "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
         cp scripts/generate-certs.ps1 "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
+        
+        # Copy integration builder script
+        cp scripts/integration_builder.py "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
+        
+        # Copy other utility scripts
+        cp scripts/migrate_to_uv.py "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
+        cp scripts/generate_architecture_graph.py "${SCRIPT_DIR}/${PACKAGE_DIR}/scripts/" 2>/dev/null || true
     fi
     
     # Step 6: Copy installation scripts

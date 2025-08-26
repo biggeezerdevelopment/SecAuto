@@ -148,8 +148,14 @@ python:
 
 # Integrations Configuration
 integrations:
+  base_path: "data/integrations"  # Base directory for integrations
   configs_path: "data/integrations/configs"
   scripts_path: "data/integrations/scripts"
+  builder_script_path: "scripts/integration_builder.py"  # Path to integration builder script
+  venvs_path: "venvs"  # Relative to base_path, or absolute path
+  # Alternative configuration example:
+  # base_path: "/custom/integrations/path"
+  # venvs_path: "/custom/venvs/path"
   external_apis:
     max_connections: 100
     timeout: 30

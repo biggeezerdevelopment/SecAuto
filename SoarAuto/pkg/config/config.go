@@ -403,11 +403,12 @@ type DiscordConfig struct {
 
 // IntegrationsConfig holds integration configuration
 type IntegrationsConfig struct {
-	ConfigsPath  string             `yaml:"configs_path"`
-	ScriptsPath  string             `yaml:"scripts_path"`
-	ExternalAPIs ExternalAPIsConfig `yaml:"external_apis"`
-	FileSystems  FileSystemsConfig  `yaml:"file_systems"`
-	Network      NetworkConfig      `yaml:"network"`
+	ConfigsPath       string             `yaml:"configs_path"`
+	ScriptsPath       string             `yaml:"scripts_path"`
+	BuilderScriptPath string             `yaml:"builder_script_path"`
+	ExternalAPIs      ExternalAPIsConfig `yaml:"external_apis"`
+	FileSystems       FileSystemsConfig  `yaml:"file_systems"`
+	Network           NetworkConfig      `yaml:"network"`
 }
 
 // ExternalAPIsConfig holds external API settings
@@ -464,8 +465,9 @@ func LoadConfig(configPath string) (*Config, error) {
 			RedisURL: "redis://localhost:6379/0",
 		},
 		Integrations: IntegrationsConfig{
-			ConfigsPath: "data/integrations/configs",
-			ScriptsPath: "data/integrations/scripts",
+			ConfigsPath:       "data/integrations/configs",
+			ScriptsPath:       "data/integrations/scripts",
+			BuilderScriptPath: "scripts/integration_builder.py",
 		},
 		Security: SecurityConfig{
 			APIKeys:     []string{"secauto-default-key-2024"},
