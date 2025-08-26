@@ -355,11 +355,11 @@ Build Date: $(date -u +%Y-%m-%d)
 
 For PostgreSQL database setup (recommended for production):
 1. Run the database installation script:
-   \`\`\`bash
+   \`\`\`
    scripts/install_postgresql.sh --db-name soar_auto --db-user ddfelts
    \`\`\`
 2. Or manually run the SQL script:
-   \`\`\`bash
+   \`\`\`
    psql -U postgres -f scripts/init_database.sql
    \`\`\`
 
