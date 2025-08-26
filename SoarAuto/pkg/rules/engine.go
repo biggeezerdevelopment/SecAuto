@@ -18,6 +18,15 @@ import (
 	"SoarAuto/pkg/types"
 )
 
+// PlaybookStopError is a special error type that indicates playbook execution should stop
+type PlaybookStopError struct {
+	Message string
+}
+
+func (e *PlaybookStopError) Error() string {
+	return e.Message
+}
+
 // Engine represents the SOAR rules engine
 type Engine struct {
 	config                   *config.Config
@@ -149,6 +158,23 @@ func (re *Engine) EvaluatePlaybook(playbook []interface{}) ([]interface{}, error
 	for i, rule := range playbook {
 		result, err := re.evaluate(rule, playbookContext)
 		if err != nil {
+			// Check if this is a PlaybookStopError (error operation)
+			if stopErr, ok := err.(*PlaybookStopError); ok {
+				// Add error information to results
+				errorResult := map[string]interface{}{
+					"success":     false,
+					"error":       true,
+					"message":     stopErr.Message,
+					"stopped_at":  i,
+					"timestamp":   time.Now().UTC().Format(time.RFC3339),
+				}
+				results = append(results, errorResult)
+				
+				// Return success but with error information indicating failure
+				return results, nil
+			}
+			
+			// For other errors, return as before
 			return results, fmt.Errorf("error in rule %d: %v", i, err)
 		}
 		
@@ -220,6 +246,8 @@ func (re *Engine) evaluateExpression(processedExpr interface{}, data map[string]
 				return re.evaluateIfOperation(value, data)
 			case "var":
 				return re.evaluateVarOperation(value, data)
+			case "error":
+				return re.evaluateErrorOperation(value, data)
 			default:
 				// Check for comparison or logical operations
 				if re.isComparisonOp(key) {
@@ -587,6 +615,24 @@ func (re *Engine) evaluateVarOperation(varName interface{}, data map[string]inte
 
 	// Direct evaluation
 	return re.evaluateDotNotation(varNameStr, data)
+}
+
+// evaluateErrorOperation handles 'error' operations
+func (re *Engine) evaluateErrorOperation(errorValue interface{}, data map[string]interface{}) (interface{}, error) {
+	// Process template variables in the error message
+	processedErrorValue := re.processTemplateVariables(errorValue, data)
+	
+	// Convert to string if needed
+	var errorMessage string
+	switch v := processedErrorValue.(type) {
+	case string:
+		errorMessage = v
+	default:
+		errorMessage = fmt.Sprintf("%v", v)
+	}
+	
+	// Return a special error that indicates playbook should stop
+	return nil, &PlaybookStopError{Message: errorMessage}
 }
 
 // evaluateComparison handles comparison operations
