@@ -1,0 +1,116 @@
+[
+  {
+    "metadata": {
+      "name": "Basic Playbook Controls Demo",
+      "description": "Demonstrates basic SecAuto playbook controls and operations",
+      "version": "1.0",
+      "author": "SecAuto Examples"
+    }
+  },
+  {
+    "comment": "=== VARIABLE OPERATIONS ===",
+    "description": "Setting and using variables"
+  },
+  {
+    "var": "user_score",
+    "value": 75
+  },
+  {
+    "var": "department", 
+    "value": "IT"
+  },
+  {
+    "log": "User score: {{user_score}}, Department: {{department}}"
+  },
+  {
+    "comment": "=== SIMPLE CONDITIONAL LOGIC ==="
+  },
+  {
+    "if": {
+      "condition": ["gt", {"var": "user_score"}, 80],
+      "then": {
+        "log": "High score detected: {{user_score}}"
+      },
+      "else": {
+        "log": "Standard score: {{user_score}}"
+      }
+    }
+  },
+  {
+    "comment": "=== MULTI-CONDITION LOGIC ==="
+  },
+  {
+    "if": {
+      "conditions": [
+        ["gt", {"var": "user_score"}, 70],
+        ["==", {"var": "department"}, "IT"]
+      ],
+      "logic": "and",
+      "then": [
+        {
+          "log": "IT user with good score"
+        },
+        {
+          "var": "access_level",
+          "value": "elevated"
+        }
+      ],
+      "else": {
+        "var": "access_level", 
+        "value": "standard"
+      }
+    }
+  },
+  {
+    "comment": "=== AUTOMATION EXECUTION ==="
+  },
+  {
+    "run": "user_analysis_script",
+    "user_id": "{{context.user_id}}",
+    "score": "{{user_score}}",
+    "department": "{{department}}"
+  },
+  {
+    "comment": "=== INTEGRATION CONTEXT EXECUTION ==="
+  },
+  {
+    "if": {
+      "condition": ["==", {"var": "access_level"}, "elevated"],
+      "then": {
+        "run": "privilege_audit",
+        "run_i": "active_directory",
+        "user": "{{context.user_id}}",
+        "verify_permissions": true
+      }
+    }
+  },
+  {
+    "comment": "=== NESTED PLAYBOOK EXECUTION ==="
+  },
+  {
+    "if": {
+      "condition": ["contains", {"var": "context.analysis_result.flags"}, "suspicious"],
+      "then": {
+        "play": "security_investigation_playbook"
+      }
+    }
+  },
+  {
+    "comment": "=== PLUGIN EXECUTION ==="
+  },
+  {
+    "plugin": {
+      "name": "network_scanner",
+      "params": {
+        "target": "{{context.user_ip}}",
+        "scan_type": "basic"
+      }
+    }
+  },
+  {
+    "comment": "=== FINAL LOGGING ==="
+  },
+  {
+    "log": "Playbook completed - Access Level: {{access_level}}"
+  }
+]

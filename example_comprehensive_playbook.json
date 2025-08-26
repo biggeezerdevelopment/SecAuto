@@ -1,0 +1,373 @@
+[
+  {
+    "metadata": {
+      "name": "Advanced Threat Investigation Playbook",
+      "description": "Comprehensive security incident investigation with multi-stage analysis, conditional logic, and automated response",
+      "version": "2.0",
+      "author": "SecAuto Security Team",
+      "category": "incident_response",
+      "tags": ["threat_hunting", "malware_analysis", "network_security", "automated_response"],
+      "created": "2024-12-29",
+      "dependencies": ["virustotal", "abuseipdb", "shodan", "urlvoid"]
+    }
+  },
+  {
+    "comment": "=== STAGE 1: INITIAL CONTEXT VALIDATION ===",
+    "description": "Validate that required incident data is present before proceeding"
+  },
+  {
+    "if": {
+      "condition": ["==", {"var": "incident.id"}, null],
+      "then": {
+        "error": "Incident ID is required",
+        "stop": true
+      },
+      "else": {
+        "log": "Starting investigation for incident {{incident.id}}"
+      }
+    }
+  },
+  {
+    "comment": "=== STAGE 2: INITIAL THREAT ASSESSMENT ===",
+    "description": "Set initial threat score and classification"
+  },
+  {
+    "var": "initial_threat_score",
+    "value": 0
+  },
+  {
+    "var": "threat_indicators",
+    "value": {
+      "suspicious_ips": [],
+      "malicious_domains": [],
+      "suspicious_files": [],
+      "network_anomalies": []
+    }
+  },
+  {
+    "comment": "=== STAGE 3: IP ADDRESS ANALYSIS ===",
+    "description": "Analyze suspicious IP addresses if present"
+  },
+  {
+    "if": {
+      "condition": ["gt", {"var": "incident.suspicious_ips.length"}, 0],
+      "then": [
+        {
+          "log": "Analyzing {{incident.suspicious_ips.length}} suspicious IP addresses"
+        },
+        {
+          "run": "ip_reputation_check",
+          "run_i": "abuseipdb",
+          "ip_addresses": "{{incident.suspicious_ips}}",
+          "confidence_threshold": 75,
+          "days_back": 30
+        },
+        {
+          "var": "abuseipdb_results",
+          "value": "{{context.abuseipdb_analysis}}"
+        },
+        {
+          "if": {
+            "condition": ["gt", {"var": "abuseipdb_results.malicious_count"}, 0],
+            "then": [
+              {
+                "var": "initial_threat_score",
+                "value": 40
+              },
+              {
+                "log": "Found {{abuseipdb_results.malicious_count}} malicious IPs - threat score increased to 40"
+              }
+            ]
+          }
+        }
+      ],
+      "else": {
+        "log": "No suspicious IP addresses to analyze"
+      }
+    }
+  },
+  {
+    "comment": "=== STAGE 4: DOMAIN/URL ANALYSIS ===",
+    "description": "Check suspicious domains and URLs for threats"
+  },
+  {
+    "if": {
+      "condition": ["or", [
+        ["gt", {"var": "incident.suspicious_domains.length"}, 0],
+        ["gt", {"var": "incident.suspicious_urls.length"}, 0]
+      ]],
+      "then": [
+        {
+          "log": "Analyzing domains and URLs for threats"
+        },
+        {
+          "run": "url_domain_scanner",
+          "run_i": "virustotal",
+          "domains": "{{incident.suspicious_domains}}",
+          "urls": "{{incident.suspicious_urls}}",
+          "detailed_scan": true
+        },
+        {
+          "var": "virustotal_results",
+          "value": "{{context.virustotal_analysis}}"
+        },
+        {
+          "if": {
+            "conditions": [
+              ["gt", {"var": "virustotal_results.malicious_count"}, 0],
+              ["gt", {"var": "virustotal_results.suspicious_count"}, 2]
+            ],
+            "logic": "or",
+            "then": [
+              {
+                "var": "initial_threat_score",
+                "value": "{{initial_threat_score + 30}}"
+              },
+              {
+                "log": "VirusTotal detected threats - threat score increased by 30"
+              },
+              {
+                "var": "threat_indicators.malicious_domains",
+                "value": "{{virustotal_results.malicious_domains}}"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "comment": "=== STAGE 5: FILE HASH ANALYSIS ===",
+    "description": "Analyze file hashes if present in the incident"
+  },
+  {
+    "if": {
+      "condition": ["gt", {"var": "incident.file_hashes.length"}, 0],
+      "then": [
+        {
+          "log": "Analyzing {{incident.file_hashes.length}} file hashes"
+        },
+        {
+          "run": "file_hash_analysis",
+          "run_i": "virustotal",
+          "hashes": "{{incident.file_hashes}}",
+          "analysis_type": "comprehensive"
+        },
+        {
+          "if": {
+            "condition": ["gt", {"var": "context.file_analysis.malware_detections"}, 0],
+            "then": [
+              {
+                "var": "initial_threat_score",
+                "value": "{{initial_threat_score + 50}}"
+              },
+              {
+                "log": "Malware detected in file analysis - threat score increased by 50"
+              },
+              {
+                "var": "threat_indicators.suspicious_files",
+                "value": "{{context.file_analysis.malicious_files}}"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "comment": "=== STAGE 6: NETWORK INFRASTRUCTURE ANALYSIS ===",
+    "description": "Perform deep network analysis using Shodan"
+  },
+  {
+    "if": {
+      "condition": ["gt", {"var": "initial_threat_score"}, 25],
+      "then": [
+        {
+          "log": "Threat score {{initial_threat_score}} warrants network infrastructure analysis"
+        },
+        {
+          "run": "network_infrastructure_scan",
+          "run_i": "shodan",
+          "target_ips": "{{incident.suspicious_ips}}",
+          "scan_ports": [22, 80, 443, 3389, 5900],
+          "vulnerability_check": true
+        },
+        {
+          "if": {
+            "condition": ["gt", {"var": "context.shodan_scan.open_ports"}, 5],
+            "then": [
+              {
+                "var": "initial_threat_score",
+                "value": "{{initial_threat_score + 20}}"
+              },
+              {
+                "log": "Multiple open ports detected - potential attack surface"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "comment": "=== STAGE 7: THREAT CLASSIFICATION ===",
+    "description": "Classify the threat based on accumulated evidence"
+  },
+  {
+    "var": "final_threat_score",
+    "value": "{{initial_threat_score}}"
+  },
+  {
+    "var": "threat_level",
+    "value": {
+      "if": {
+        "condition": ["gte", {"var": "final_threat_score"}, 80],
+        "then": "CRITICAL",
+        "else": {
+          "if": {
+            "condition": ["gte", {"var": "final_threat_score"}, 60],
+            "then": "HIGH",
+            "else": {
+              "if": {
+                "condition": ["gte", {"var": "final_threat_score"}, 40],
+                "then": "MEDIUM",
+                "else": "LOW"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "log": "Threat analysis complete - Final Score: {{final_threat_score}}, Level: {{threat_level}}"
+  },
+  {
+    "comment": "=== STAGE 8: AUTOMATED RESPONSE DECISION ===",
+    "description": "Execute appropriate response based on threat level"
+  },
+  {
+    "if": {
+      "condition": ["==", {"var": "threat_level"}, "CRITICAL"],
+      "then": [
+        {
+          "log": "CRITICAL threat detected - initiating emergency response"
+        },
+        {
+          "run": "emergency_incident_response",
+          "incident_id": "{{incident.id}}",
+          "threat_score": "{{final_threat_score}}",
+          "indicators": "{{threat_indicators}}",
+          "escalate_immediately": true,
+          "block_ips": "{{threat_indicators.suspicious_ips}}",
+          "quarantine_files": "{{threat_indicators.suspicious_files}}"
+        },
+        {
+          "run": "send_alert_notification",
+          "priority": "CRITICAL",
+          "recipients": ["soc@company.com", "security-manager@company.com"],
+          "incident_summary": "Critical threat detected in incident {{incident.id}}"
+        }
+      ],
+      "else": {
+        "if": {
+          "condition": ["==", {"var": "threat_level"}, "HIGH"],
+          "then": [
+            {
+              "log": "HIGH threat detected - initiating elevated response"
+            },
+            {
+              "run": "elevated_incident_response",
+              "incident_id": "{{incident.id}}",
+              "threat_score": "{{final_threat_score}}",
+              "indicators": "{{threat_indicators}}",
+              "monitor_closely": true
+            }
+          ],
+          "else": {
+            "if": {
+              "condition": ["in", {"var": "threat_level"}, ["MEDIUM", "LOW"]],
+              "then": [
+                {
+                  "log": "{{threat_level}} threat detected - standard monitoring"
+                },
+                {
+                  "run": "standard_incident_logging",
+                  "incident_id": "{{incident.id}}",
+                  "threat_score": "{{final_threat_score}}",
+                  "continue_monitoring": true
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "comment": "=== STAGE 9: ENRICHMENT AND INTELLIGENCE GATHERING ===",
+    "description": "Gather additional threat intelligence for future reference"
+  },
+  {
+    "if": {
+      "condition": ["gte", {"var": "final_threat_score"}, 40],
+      "then": [
+        {
+          "run": "threat_intelligence_enrichment",
+          "indicators": "{{threat_indicators}}",
+          "incident_context": "{{incident}}",
+          "store_iocs": true,
+          "update_threat_feeds": true
+        },
+        {
+          "log": "Threat intelligence updated with new indicators"
+        }
+      ]
+    }
+  },
+  {
+    "comment": "=== STAGE 10: INVESTIGATION SUMMARY ===",
+    "description": "Generate comprehensive investigation report"
+  },
+  {
+    "run": "generate_investigation_report",
+    "incident_id": "{{incident.id}}",
+    "threat_score": "{{final_threat_score}}",
+    "threat_level": "{{threat_level}}",
+    "analysis_results": {
+      "abuseipdb": "{{abuseipdb_results}}",
+      "virustotal": "{{virustotal_results}}",
+      "shodan": "{{context.shodan_scan}}",
+      "file_analysis": "{{context.file_analysis}}"
+    },
+    "threat_indicators": "{{threat_indicators}}",
+    "response_actions": "{{context.response_actions}}",
+    "recommendations": [
+      "Monitor identified indicators",
+      "Update security rules",
+      "Review affected systems"
+    ]
+  },
+  {
+    "var": "investigation_complete",
+    "value": true
+  },
+  {
+    "log": "Investigation playbook completed successfully for incident {{incident.id}}"
+  },
+  {
+    "comment": "=== FINAL STAGE: CLEANUP AND NEXT STEPS ===",
+    "description": "Schedule follow-up actions if needed"
+  },
+  {
+    "if": {
+      "condition": ["gte", {"var": "final_threat_score"}, 60],
+      "then": {
+        "run": "schedule_follow_up_investigation",
+        "incident_id": "{{incident.id}}",
+        "follow_up_in_hours": 24,
+        "monitor_indicators": "{{threat_indicators}}"
+      }
+    }
+  }
+]
