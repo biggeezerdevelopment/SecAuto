@@ -1030,10 +1030,12 @@ func (s *SecAutoServer) triggerIntegrationBuild(configPath string, integrationNa
 		workDir, _ := os.Getwd()
 		scriptPath = filepath.Join(workDir, scriptPath)
 	}
-	cmd := exec.Command(pythonPath, scriptPath, "build", "--config", configPath)
+	// Pass the current working directory as base path
+	workDir, _ := os.Getwd()
+	cmd := exec.Command(pythonPath, scriptPath, "build", "--config", configPath, "--base-path", workDir)
 	
 	// Set working directory to current working directory
-	cmd.Dir, _ = os.Getwd()
+	cmd.Dir = workDir
 	
 	// Run the command and capture output
 	output, err := cmd.CombinedOutput()
@@ -1097,14 +1099,16 @@ func (s *SecAutoServer) integrationBuildStatusHandler(w http.ResponseWriter, r *
 	}
 	var cmd *exec.Cmd
 	
+	// Pass the current working directory as base path
+	workDir, _ := os.Getwd()
 	if integrationName != "" {
-		cmd = exec.Command(pythonPath, scriptPath, "status", "--name", integrationName)
+		cmd = exec.Command(pythonPath, scriptPath, "status", "--name", integrationName, "--base-path", workDir)
 	} else {
-		cmd = exec.Command(pythonPath, scriptPath, "status")
+		cmd = exec.Command(pythonPath, scriptPath, "status", "--base-path", workDir)
 	}
 	
 	// Set working directory to current working directory
-	cmd.Dir, _ = os.Getwd()
+	cmd.Dir = workDir
 	
 	// Run the command
 	output, err := cmd.CombinedOutput()

@@ -238,7 +238,9 @@ func (im *IntegrationManager) buildIntegrationEnvironment(definition *Integratio
 	// Use the UV builder script
 	configPath := filepath.Join(im.configsPath, definition.Name+".json")
 	
-	cmd := exec.Command(im.pythonPath, im.builderPath, "build", "--config", configPath)
+	// Pass the current working directory as base path
+	workDir, _ := os.Getwd()
+	cmd := exec.Command(im.pythonPath, im.builderPath, "build", "--config", configPath, "--base-path", workDir)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -422,7 +424,8 @@ func (im *IntegrationManager) CleanIntegration(integrationName string) error {
 	})
 
 	// Use the UV builder to clean
-	cmd := exec.Command(im.pythonPath, im.builderPath, "clean", "--name", integrationName)
+	workDir, _ := os.Getwd()
+	cmd := exec.Command(im.pythonPath, im.builderPath, "clean", "--name", integrationName, "--base-path", workDir)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -541,7 +544,8 @@ func (im *IntegrationManager) MigrateFromOldSystem(integrationName string) error
 	})
 
 	// Use the UV builder to migrate
-	cmd := exec.Command(im.pythonPath, im.builderPath, "migrate", "--name", integrationName)
+	workDir, _ := os.Getwd()
+	cmd := exec.Command(im.pythonPath, im.builderPath, "migrate", "--name", integrationName, "--base-path", workDir)
 	
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

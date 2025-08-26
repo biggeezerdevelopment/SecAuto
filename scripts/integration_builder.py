@@ -34,7 +34,12 @@ class IntegrationBuilder:
     
     def __init__(self, base_path: str = None, config_file: str = None):
         """Initialize the integration builder with base paths"""
-        self.base_path = Path(base_path or os.getcwd())
+        if base_path is None:
+            # Default to the directory containing this script's parent directory
+            script_dir = Path(__file__).parent
+            self.base_path = script_dir.parent  # Go up one level from scripts/ to the main directory
+        else:
+            self.base_path = Path(base_path)
         
         # Load configuration from config.yaml
         self.config = self._load_config(config_file)
@@ -42,7 +47,7 @@ class IntegrationBuilder:
         # Setup paths from configuration
         self._setup_paths_from_config()
         
-        self.server_dir = self.base_path / "SoarAuto" / "server"
+        self.server_dir = self.base_path / "server"
         self.build_status_file = self.integrations_dir / ".uv_build_status.json"
         
         # Create necessary directories
@@ -65,7 +70,10 @@ class IntegrationBuilder:
     def _load_config(self, config_file: str = None) -> Dict:
         """Load configuration from config.yaml"""
         if config_file is None:
-            config_file = self.base_path / "SoarAuto" / "config.yaml"
+            # Try config.yaml in base path first, then in SoarAuto subdirectory
+            config_file = self.base_path / "config.yaml"
+            if not config_file.exists():
+                config_file = self.base_path / "SoarAuto" / "config.yaml"
         else:
             config_file = Path(config_file)
         
@@ -90,7 +98,7 @@ class IntegrationBuilder:
         
         # Convert relative paths to absolute paths based on base_path
         if not os.path.isabs(base_integrations_path):
-            self.integrations_dir = self.base_path / "SoarAuto" / base_integrations_path
+            self.integrations_dir = self.base_path / base_integrations_path
         else:
             self.integrations_dir = Path(base_integrations_path)
         
@@ -507,7 +515,7 @@ def main():
     parser.add_argument("--config", help="Path to integration config (for build)")
     parser.add_argument("--name", help="Integration name (for clean/status/migrate)")
     parser.add_argument("--base-path", help="Base path for SecAuto", 
-                       default="/Volumes/My Shared Files/Home/Downloads/SecAuto")
+                       default=None)
     parser.add_argument("--config-file", help="Path to config.yaml file")
     
     args = parser.parse_args()
