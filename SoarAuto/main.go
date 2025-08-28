@@ -177,9 +177,15 @@ func NewSecAutoServer() (*SecAutoServer, error) {
 			lgr,
 		)
 	} else {
-		// Fallback to legacy path-based method
+		// Fallback to legacy path-based method with Redis caching
+		encryptionKey := cfg.Security.IntegrationEncryptionKey
+		if encryptionKey == "" {
+			encryptionKey = "default-encryption-key-change-in-production"
+		}
 		clientIntegrationManager, err = integrations.NewClientIntegrationManagerWithLegacyPath(
 			filepath.Join("data", "clients"),
+			redisClient.GetClient(),
+			encryptionKey,
 			lgr,
 		)
 	}

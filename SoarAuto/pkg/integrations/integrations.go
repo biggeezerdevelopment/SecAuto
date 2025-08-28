@@ -306,7 +306,20 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 		"params":   params,
 		"config":   clientConfig.Config,
 		"credentials": clientConfig.Credentials,
+		"client_id": clientConfig.ClientID,
 	}
+
+	// Log the configuration being used (with credentials masked)
+	maskedContext := map[string]interface{}{
+		"function": function,
+		"params":   params,
+		"config":   clientConfig.Config,
+		"credentials": maskCredentials(clientConfig.Credentials),
+		"client_id": clientConfig.ClientID,
+		"integration": integrationName,
+	}
+	
+	im.logger.Debug("Executing integration with context", maskedContext)
 
 	contextJSON, err := json.Marshal(context)
 	if err != nil {
@@ -339,6 +352,20 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 		fmt.Sprintf("INTEGRATION_NAME=%s", integrationName),
 		fmt.Sprintf("INTEGRATION_FUNCTION=%s", function),
 	)
+	
+	// Add debug mode if enabled
+	if os.Getenv("SECAUTO_DEBUG_INTEGRATIONS") == "true" {
+		cmd.Env = append(cmd.Env, "SECAUTO_DEBUG_INTEGRATIONS=true")
+		
+		// Log the full context being sent (for debugging only)
+		im.logger.Info("DEBUG: Full integration context", map[string]interface{}{
+			"integration": integrationName,
+			"function": function,
+			"config": clientConfig.Config,
+			"has_credentials": clientConfig.Credentials != nil && len(clientConfig.Credentials) > 0,
+			"credential_keys": getCredentialKeys(clientConfig.Credentials),
+		})
+	}
 
 	// Add build environment variables
 	for k, v := range definition.Build.Environment {
@@ -394,6 +421,49 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 	}
 
 	return result, nil
+}
+
+// maskCredentials creates a copy of credentials with values masked for logging
+func maskCredentials(credentials map[string]interface{}) map[string]interface{} {
+	if credentials == nil {
+		return nil
+	}
+	
+	masked := make(map[string]interface{})
+	for key, value := range credentials {
+		if value == nil || value == "" {
+			masked[key] = nil
+		} else {
+			// Show first 2 chars and mask the rest
+			strValue := fmt.Sprintf("%v", value)
+			if len(strValue) > 2 {
+				masked[key] = strValue[:2] + strings.Repeat("*", min(len(strValue)-2, 8))
+			} else {
+				masked[key] = strings.Repeat("*", len(strValue))
+			}
+		}
+	}
+	return masked
+}
+
+// Helper function for min of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// getCredentialKeys returns the keys from a credentials map
+func getCredentialKeys(credentials map[string]interface{}) []string {
+	if credentials == nil {
+		return []string{}
+	}
+	keys := make([]string, 0, len(credentials))
+	for k := range credentials {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // IsIntegrationBuilt checks if an integration's UV environment has been built

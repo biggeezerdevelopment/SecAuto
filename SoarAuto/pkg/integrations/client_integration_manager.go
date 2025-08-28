@@ -17,6 +17,15 @@ type ClientIntegrationManager struct {
 	logger        types.Logger
 }
 
+// getMapKeys returns the keys of a map as a slice
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // NewClientIntegrationManager creates a new client integration manager
 func NewClientIntegrationManager(db *sql.DB, redis *redis.Client, encryptionKey string, logger types.Logger) (*ClientIntegrationManager, error) {
 	configManager := NewConfigManager(db, redis, encryptionKey, logger)
@@ -29,9 +38,9 @@ func NewClientIntegrationManager(db *sql.DB, redis *redis.Client, encryptionKey 
 
 // NewClientIntegrationManagerWithLegacyPath creates a new client integration manager with legacy file-based storage
 // This is a temporary function to maintain compatibility until database migration is complete
-func NewClientIntegrationManagerWithLegacyPath(clientsPath string, logger types.Logger) (*ClientIntegrationManager, error) {
-	// For now, use Redis-only config manager with nil database
-	configManager := NewConfigManager(nil, nil, "default-encryption-key", logger)
+func NewClientIntegrationManagerWithLegacyPath(clientsPath string, redis *redis.Client, encryptionKey string, logger types.Logger) (*ClientIntegrationManager, error) {
+	// Use config manager with Redis for caching and file-based fallback
+	configManager := NewConfigManagerWithFallback(nil, redis, encryptionKey, clientsPath, logger)
 
 	return &ClientIntegrationManager{
 		configManager: configManager,
@@ -71,6 +80,30 @@ func (cim *ClientIntegrationManager) GetClientIntegrationConfig(clientID, integr
 		CreatedAt:   dbConfig.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   dbConfig.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
+
+	// Log the retrieved config (with masked credentials)
+	maskedCreds := make(map[string]interface{})
+	for k, v := range config.Credentials {
+		if v != nil && v != "" {
+			strVal := fmt.Sprintf("%v", v)
+			if len(strVal) > 2 {
+				maskedCreds[k] = strVal[:2] + "***"
+			} else {
+				maskedCreds[k] = "***"
+			}
+		} else {
+			maskedCreds[k] = v
+		}
+	}
+	
+	cim.logger.Debug("Retrieved client integration config", map[string]interface{}{
+		"client_id": clientID,
+		"integration": integrationName,
+		"enabled": config.Enabled,
+		"config_keys": getMapKeys(config.Config),
+		"credential_keys": getMapKeys(config.Credentials),
+		"masked_credentials": maskedCreds,
+	})
 
 	return config, nil
 }

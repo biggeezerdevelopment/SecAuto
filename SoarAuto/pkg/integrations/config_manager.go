@@ -26,6 +26,7 @@ type ConfigManager struct {
 	encryptionKey []byte
 	logger        types.Logger
 	cacheTTL      time.Duration
+	dataPath      string // Fallback file storage path when database is not available
 }
 
 // DBClientIntegrationConfig represents a client's integration configuration in the database
@@ -51,6 +52,22 @@ func NewConfigManager(db *sql.DB, redis *redis.Client, encryptionKey string, log
 		encryptionKey: hash[:],
 		logger:        logger,
 		cacheTTL:      5 * time.Minute,
+		dataPath:      "", // No fallback path when using database
+	}
+}
+
+// NewConfigManagerWithFallback creates a new configuration manager with file-based fallback
+func NewConfigManagerWithFallback(db *sql.DB, redis *redis.Client, encryptionKey string, dataPath string, logger types.Logger) *ConfigManager {
+	// Derive 32-byte key from provided string
+	hash := sha256.Sum256([]byte(encryptionKey))
+	
+	return &ConfigManager{
+		db:            db,
+		redis:         redis,
+		encryptionKey: hash[:],
+		logger:        logger,
+		cacheTTL:      5 * time.Minute,
+		dataPath:      dataPath,
 	}
 }
 
@@ -62,19 +79,45 @@ func (cm *ConfigManager) GetClientIntegrationConfig(clientID, integrationName st
 	if cm.redis != nil {
 		ctx := context.Background()
 		cached, err := cm.redis.Get(ctx, cacheKey).Result()
-		if err == nil {
+		if err == nil && cached != "" {
 			var config DBClientIntegrationConfig
 			if err := json.Unmarshal([]byte(cached), &config); err == nil {
 				cm.logger.Debug("Retrieved config from cache", map[string]interface{}{
 					"client_id": clientID,
 					"integration": integrationName,
+					"cache_key": cacheKey,
 				})
 				return &config, nil
+			} else {
+				cm.logger.Warning("Failed to unmarshal cached config", map[string]interface{}{
+					"client_id": clientID,
+					"integration": integrationName,
+					"cache_key": cacheKey,
+					"error": err.Error(),
+				})
 			}
+		} else if err != nil && err != redis.Nil {
+			cm.logger.Warning("Redis error when retrieving config", map[string]interface{}{
+				"client_id": clientID,
+				"integration": integrationName,
+				"cache_key": cacheKey,
+				"error": err.Error(),
+			})
+		} else {
+			cm.logger.Debug("Cache miss for config", map[string]interface{}{
+				"client_id": clientID,
+				"integration": integrationName,
+				"cache_key": cacheKey,
+			})
 		}
 	}
 	
 	// Fallback to database
+	cm.logger.Debug("Fetching config from database", map[string]interface{}{
+		"client_id": clientID,
+		"integration": integrationName,
+	})
+	
 	config, err := cm.getFromDatabase(clientID, integrationName)
 	if err != nil {
 		return nil, err
@@ -238,6 +281,20 @@ func (cm *ConfigManager) getCacheKey(clientID, integrationName string) string {
 
 func (cm *ConfigManager) getFromDatabase(clientID, integrationName string) (*DBClientIntegrationConfig, error) {
 	if cm.db == nil {
+		// If database is not available but we have a data path, try file-based storage
+		if cm.dataPath != "" {
+			cm.logger.Debug("Database not available, trying file-based fallback", map[string]interface{}{
+				"client_id": clientID,
+				"integration": integrationName,
+				"data_path": cm.dataPath,
+			})
+			return cm.getFromFile(clientID, integrationName)
+		}
+		
+		cm.logger.Debug("Database not available and no fallback path configured", map[string]interface{}{
+			"client_id": clientID,
+			"integration": integrationName,
+		})
 		return nil, fmt.Errorf("database not available - integration config not found")
 	}
 	
@@ -281,6 +338,9 @@ func (cm *ConfigManager) cacheConfig(config *DBClientIntegrationConfig) {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		cm.logger.Warning("Failed to marshal config for cache", map[string]interface{}{
+			"client_id": config.ClientID,
+			"integration": config.IntegrationName,
+			"cache_key": cacheKey,
 			"error": err.Error(),
 		})
 		return
@@ -289,7 +349,17 @@ func (cm *ConfigManager) cacheConfig(config *DBClientIntegrationConfig) {
 	err = cm.redis.SetEx(ctx, cacheKey, configJSON, cm.cacheTTL).Err()
 	if err != nil {
 		cm.logger.Warning("Failed to cache config", map[string]interface{}{
+			"client_id": config.ClientID,
+			"integration": config.IntegrationName,
+			"cache_key": cacheKey,
 			"error": err.Error(),
+		})
+	} else {
+		cm.logger.Debug("Successfully cached config", map[string]interface{}{
+			"client_id": config.ClientID,
+			"integration": config.IntegrationName,
+			"cache_key": cacheKey,
+			"ttl_seconds": cm.cacheTTL.Seconds(),
 		})
 	}
 }
@@ -498,6 +568,64 @@ func (cm *ConfigManager) migrateConfigFile(clientID, configFile string) error {
 	
 	// Save to database
 	return cm.SaveClientIntegrationConfig(dbConfig)
+}
+
+func (cm *ConfigManager) getFromFile(clientID, integrationName string) (*DBClientIntegrationConfig, error) {
+	// Build the file path
+	configFile := filepath.Join(cm.dataPath, clientID, "integrations", "configs", integrationName+".json")
+	
+	// Check if file exists
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		cm.logger.Debug("Config file not found", map[string]interface{}{
+			"client_id": clientID,
+			"integration": integrationName,
+			"file_path": configFile,
+		})
+		return nil, fmt.Errorf("integration config not found")
+	}
+	
+	// Read the file
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %v", err)
+	}
+	
+	// Parse the legacy format
+	var legacyConfig struct {
+		Name        string                 `json:"name"`
+		Enabled     bool                   `json:"enabled"`
+		Config      map[string]interface{} `json:"config"`
+		Credentials map[string]interface{} `json:"credentials"`
+		ClientID    string                 `json:"client_id"`
+		CreatedAt   string                 `json:"created_at"`
+		UpdatedAt   string                 `json:"updated_at"`
+	}
+	
+	if err := json.Unmarshal(data, &legacyConfig); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %v", err)
+	}
+	
+	// Parse timestamps
+	createdAt, _ := time.Parse("2006-01-02T15:04:05Z", legacyConfig.CreatedAt)
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	updatedAt, _ := time.Parse("2006-01-02T15:04:05Z", legacyConfig.UpdatedAt)
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	
+	// Convert to database model
+	return &DBClientIntegrationConfig{
+		ID:              fmt.Sprintf("%s_%s", clientID, integrationName), // Generate an ID
+		ClientID:        clientID,
+		IntegrationName: integrationName,
+		Enabled:         legacyConfig.Enabled,
+		Config:          legacyConfig.Config,
+		Credentials:     legacyConfig.Credentials,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
+	}, nil
 }
 
 func isDirectory(path string) bool {
