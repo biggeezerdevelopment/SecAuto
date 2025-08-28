@@ -320,6 +320,17 @@ func (im *IntegrationManager) ExecuteIntegration(integrationName string, clientC
 	}
 	
 	im.logger.Debug("Executing integration with context", maskedContext)
+	
+	// Additional debug logging
+	im.logger.Debug("ClientConfig details", map[string]interface{}{
+		"name": clientConfig.Name,
+		"enabled": clientConfig.Enabled,
+		"client_id": clientConfig.ClientID,
+		"config_is_nil": clientConfig.Config == nil,
+		"config_length": len(clientConfig.Config),
+		"credentials_is_nil": clientConfig.Credentials == nil,
+		"credentials_length": len(clientConfig.Credentials),
+	})
 
 	contextJSON, err := json.Marshal(context)
 	if err != nil {
