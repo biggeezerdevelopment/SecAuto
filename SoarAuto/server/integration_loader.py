@@ -10,7 +10,7 @@ import os
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -185,6 +185,17 @@ echo "Integration: {integration_name}"
             'client_id': client_id
         }
         
+        # Get client integration configuration from the Go server
+        if client_id:
+            try:
+                config, credentials = self._get_client_integration_config(integration_name, client_id)
+                context['config'] = config
+                context['credentials'] = credentials
+            except Exception as e:
+                logger.warning(f"Failed to get client integration config: {e}")
+                # Continue without config for backward compatibility
+                pass
+        
         # Get integration script path
         script_path = self.scripts_dir / f"{integration_name}_integration.py"
         
@@ -321,6 +332,48 @@ echo "Integration: {integration_name}"
         
         # Create new environment
         return self.create_integration_environment(integration_name, requirements)
+    
+    def _get_client_integration_config(self, integration_name: str, client_id: str) -> Tuple[Dict, Dict]:
+        """
+        Get client integration configuration from the Go server API
+        
+        Returns:
+            Tuple of (config, credentials)
+        """
+        import requests
+        
+        # Determine server URL - try common ports
+        server_urls = [
+            "http://localhost:8080",
+            "http://localhost:9090", 
+            "http://localhost:3000"
+        ]
+        
+        for base_url in server_urls:
+            try:
+                config_url = f"{base_url}/api/v1/clients/{client_id}/integrations/{integration_name}/config"
+                
+                # Make request with a short timeout
+                response = requests.get(config_url, timeout=2)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Extract config from response structure
+                    if 'config' in data and 'config' in data['config']:
+                        config_data = data['config']['config']
+                        credentials_data = data['config'].get('credentials', {}) or {}
+                        
+                        logger.info(f"Retrieved config for {integration_name} from {base_url}")
+                        return config_data, credentials_data
+                        
+            except requests.RequestException:
+                # Try next URL
+                continue
+                
+        # If we get here, all servers failed
+        raise Exception(f"Could not retrieve config from any server for {integration_name}/{client_id}")
+    
 
 
 # Backward compatibility function

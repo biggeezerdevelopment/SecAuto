@@ -251,6 +251,8 @@ func (re *Engine) evaluateExpression(processedExpr interface{}, data map[string]
 				return re.evaluateErrorOperation(value, data)
 			case "math":
 				return re.evaluateMathOperation(value, data)
+			case "integration":
+				return re.evaluateIntegrationStep(expr, data)
 			default:
 				// Check for comparison or logical operations
 				if re.isComparisonOp(key) {
@@ -347,6 +349,74 @@ func (re *Engine) evaluateRunOperation(scriptName interface{}, operation map[str
 
 	// Execute the script with enhanced context
 	return re.executeScript(scriptPath, enhancedData)
+}
+
+// evaluateIntegrationStep handles integration execution steps
+func (re *Engine) evaluateIntegrationStep(step map[string]interface{}, data map[string]interface{}) (interface{}, error) {
+	// Extract integration details from step
+	integrationName, hasIntegration := step["integration"]
+	if !hasIntegration {
+		return nil, fmt.Errorf("integration step missing 'integration' field")
+	}
+	
+	integrationNameStr, ok := integrationName.(string)
+	if !ok {
+		return nil, fmt.Errorf("integration name must be a string")
+	}
+	
+	function, hasFunction := step["function"]
+	if !hasFunction {
+		return nil, fmt.Errorf("integration step missing 'function' field")
+	}
+	
+	functionStr, ok := function.(string)
+	if !ok {
+		return nil, fmt.Errorf("function name must be a string")
+	}
+	
+	// Extract params (optional)
+	params := make(map[string]interface{})
+	if stepParams, hasParams := step["params"]; hasParams {
+		if paramsMap, ok := stepParams.(map[string]interface{}); ok {
+			params = paramsMap
+		}
+	}
+	
+	// Get client ID from context
+	clientIDInterface, hasClientID := data["client_id"]
+	if !hasClientID {
+		return nil, fmt.Errorf("client_id not found in context")
+	}
+	
+	clientIDStr, ok := clientIDInterface.(string)
+	if !ok {
+		return nil, fmt.Errorf("client_id must be a string")
+	}
+	
+	// Get client integration configuration
+	clientConfig, err := re.clientIntegrationManager.GetClientIntegrationConfig(clientIDStr, integrationNameStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client integration config: %v", err)
+	}
+	
+	// Check if integration is enabled
+	if !clientConfig.Enabled {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "Integration is disabled for this client",
+		}, nil
+	}
+	
+	// Execute the integration
+	result, err := re.integrationManager.ExecuteIntegration(integrationNameStr, clientConfig, functionStr, params)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("Integration execution failed: %v", err),
+		}, nil
+	}
+	
+	return result, nil
 }
 
 // evaluatePlayOperation handles 'play' operations
