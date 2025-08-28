@@ -2288,6 +2288,50 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						},
 					},
 				},
+				"delete": map[string]interface{}{
+					"summary":     "Delete Client Integration Configuration",
+					"description": "Delete configuration for a specific client integration",
+					"tags":        []string{"Clients", "Integrations"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "clientId",
+							"in":          "path",
+							"required":    true,
+							"description": "Client ID",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "integrationName",
+							"in":          "path",
+							"required":    true,
+							"description": "Integration name (e.g., postgresql, virustotal)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Integration configuration deleted successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientIntegrationConfigResponse",
+									},
+								},
+							},
+						},
+						"404": map[string]interface{}{
+							"description": "Client or integration not found",
+						},
+						"500": map[string]interface{}{
+							"description": "Internal server error",
+						},
+					},
+				},
 			},
 			"/clients/{clientId}/integrations/{integrationName}/execute": map[string]interface{}{
 				"post": map[string]interface{}{

@@ -1,0 +1,473 @@
+{
+  "/clients/{client_id}/integrations": {
+    "get": {
+      "summary": "List Client Integrations",
+      "description": "Retrieve a list of all integration configurations for a specific client",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Client integrations retrieved successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean"},
+                  "message": {"type": "string"},
+                  "client_id": {"type": "string"},
+                  "count": {"type": "integer"},
+                  "integrations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {"type": "string"},
+                        "enabled": {"type": "boolean"},
+                        "config": {"type": "object"},
+                        "credentials": {"type": "object"},
+                        "client_id": {"type": "string"},
+                        "created_at": {"type": "string", "format": "date-time"},
+                        "updated_at": {"type": "string", "format": "date-time"}
+                      }
+                    }
+                  },
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Client not found"
+        }
+      }
+    }
+  },
+  "/clients/{client_id}/integrations/{integration_name}/config": {
+    "get": {
+      "summary": "Get Client Integration Config",
+      "description": "Retrieve configuration for a specific integration for a client",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "integration_name",
+          "in": "path",
+          "required": true,
+          "description": "Integration name (e.g., 'postgresql', 'slack')",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Integration config retrieved successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean"},
+                  "message": {"type": "string"},
+                  "client_id": {"type": "string"},
+                  "integration": {"type": "string"},
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "name": {"type": "string"},
+                      "enabled": {"type": "boolean"},
+                      "config": {"type": "object"},
+                      "credentials": {"type": "object"},
+                      "client_id": {"type": "string"},
+                      "created_at": {"type": "string"},
+                      "updated_at": {"type": "string"}
+                    }
+                  },
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Client or integration config not found"
+        }
+      }
+    },
+    "post": {
+      "summary": "Create Client Integration Config",
+      "description": "Create a new integration configuration for a client",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "integration_name",
+          "in": "path",
+          "required": true,
+          "description": "Integration name",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Whether the integration is enabled for this client"
+                },
+                "config": {
+                  "type": "object",
+                  "description": "Integration configuration settings (host, port, database, etc.)"
+                },
+                "credentials": {
+                  "type": "object",
+                  "description": "Encrypted credentials (password, tokens, API keys, etc.)"
+                }
+              },
+              "required": ["enabled", "config"]
+            },
+            "examples": {
+              "postgresql_config": {
+                "summary": "PostgreSQL Integration Config",
+                "value": {
+                  "enabled": true,
+                  "config": {
+                    "host": "localhost",
+                    "port": 5432,
+                    "database": "mydb",
+                    "username": "dbuser",
+                    "ssl_mode": "disable"
+                  },
+                  "credentials": {
+                    "password": "secret123"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "description": "Integration config created successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean"},
+                  "message": {"type": "string"},
+                  "client_id": {"type": "string"},
+                  "integration": {"type": "string"},
+                  "config": {"type": "object"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Validation failed"
+        },
+        "404": {
+          "description": "Client or global integration not found"
+        }
+      }
+    },
+    "put": {
+      "summary": "Update Client Integration Config",
+      "description": "Update an existing integration configuration for a client",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "integration_name",
+          "in": "path",
+          "required": true,
+          "description": "Integration name",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Whether the integration is enabled for this client"
+                },
+                "config": {
+                  "type": "object",
+                  "description": "Integration configuration settings"
+                },
+                "credentials": {
+                  "type": "object",
+                  "description": "Encrypted credentials"
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Integration config updated successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean"},
+                  "message": {"type": "string"},
+                  "client_id": {"type": "string"},
+                  "integration": {"type": "string"},
+                  "config": {"type": "object"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Validation failed"
+        },
+        "404": {
+          "description": "Client or integration config not found"
+        }
+      }
+    },
+    "delete": {
+      "summary": "Delete Client Integration Config",
+      "description": "Delete an integration configuration for a client. This removes the configuration from both database and cache.",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "integration_name",
+          "in": "path",
+          "required": true,
+          "description": "Integration name to delete",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Integration config deleted successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean", "example": true},
+                  "message": {"type": "string", "example": "Integration config deleted successfully"},
+                  "client_id": {"type": "string"},
+                  "integration": {"type": "string"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Client or integration config not found",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean", "example": false},
+                  "message": {"type": "string", "example": "Integration config not found"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "500": {
+          "description": "Internal server error",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean", "example": false},
+                  "message": {"type": "string", "example": "Failed to delete integration config: database error"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "/clients/{client_id}/integrations/{integration_name}/execute": {
+    "post": {
+      "summary": "Execute Client Integration",
+      "description": "Execute a specific function within an integration for a client",
+      "tags": ["Client Integrations"],
+      "security": [{"ApiKeyAuth": []}],
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "description": "Client ID",
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "integration_name",
+          "in": "path",
+          "required": true,
+          "description": "Integration name",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "requestBody": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "function": {
+                  "type": "string",
+                  "description": "Function name to execute"
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Parameters to pass to the function"
+                }
+              },
+              "required": ["function"]
+            },
+            "examples": {
+              "test_connection": {
+                "summary": "Test Database Connection",
+                "value": {
+                  "function": "test_connection",
+                  "params": {}
+                }
+              },
+              "query_data": {
+                "summary": "Query Database",
+                "value": {
+                  "function": "query",
+                  "params": {
+                    "sql": "SELECT * FROM users LIMIT 10",
+                    "params": []
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "Integration executed successfully",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean"},
+                  "result": {"type": "object"},
+                  "message": {"type": "string"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "Integration is disabled for this client",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "success": {"type": "boolean", "example": false},
+                  "message": {"type": "string", "example": "Integration is disabled for this client"},
+                  "timestamp": {"type": "string", "format": "date-time"}
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Client or integration not found"
+        },
+        "500": {
+          "description": "Integration execution failed"
+        }
+      }
+    }
+  }
+}

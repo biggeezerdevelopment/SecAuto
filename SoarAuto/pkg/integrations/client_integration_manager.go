@@ -155,13 +155,23 @@ func (cim *ClientIntegrationManager) ListClientIntegrations(clientID string) ([]
 	return configs, nil
 }
 
-// DeleteClientIntegrationConfig removes a client's integration configuration
+// DeleteClientIntegrationConfig deletes a client's configuration for an integration
 func (cim *ClientIntegrationManager) DeleteClientIntegrationConfig(clientID, integrationName string) error {
 	cim.mutex.Lock()
 	defer cim.mutex.Unlock()
 
 	// Use the hybrid ConfigManager to delete
-	return cim.configManager.DeleteClientIntegrationConfig(clientID, integrationName)
+	err := cim.configManager.DeleteClientIntegrationConfig(clientID, integrationName)
+	if err != nil {
+		return fmt.Errorf("failed to delete client integration config: %v", err)
+	}
+
+	cim.logger.Info("Deleted client integration config", map[string]interface{}{
+		"client_id": clientID,
+		"integration": integrationName,
+	})
+
+	return nil
 }
 
 // ValidateClientConfig validates a client's integration configuration against the global integration

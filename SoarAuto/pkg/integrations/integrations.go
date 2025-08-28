@@ -605,8 +605,28 @@ func (im *IntegrationManager) DeleteIntegration(name string) error {
 	definitionPath := filepath.Join(im.configsPath, name+".json")
 	os.Remove(definitionPath)
 
-	// Clean UV environment
-	im.CleanIntegration(name)
+	// Clean UV environment using the builder script
+	if err := im.CleanIntegration(name); err != nil {
+		im.logger.Warning("UV builder clean failed, attempting direct removal", map[string]interface{}{
+			"integration": name,
+			"error":       err.Error(),
+		})
+		
+		// Fallback: directly remove venv directory
+		venvPath := filepath.Join(im.venvPath, name)
+		if err := os.RemoveAll(venvPath); err != nil {
+			im.logger.Error("Failed to remove venv directory", map[string]interface{}{
+				"integration": name,
+				"venv_path":   venvPath,
+				"error":       err.Error(),
+			})
+		} else {
+			im.logger.Info("Successfully removed venv directory directly", map[string]interface{}{
+				"integration": name,
+				"venv_path":   venvPath,
+			})
+		}
+	}
 
 	// Remove from memory
 	delete(im.definitions, name)

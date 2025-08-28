@@ -1308,6 +1308,14 @@ func (re *Engine) executeInIntegrationContext(scriptName string, integrationName
 		return nil, fmt.Errorf("integration '%s' not configured for client '%s'", integrationNameStr, clientIDStr)
 	}
 
+	// Check if integration is enabled for this client
+	if !clientConfig.Enabled {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "Integration is disabled for this client",
+		}, nil
+	}
+
 	// Process additional parameters for the automation context
 	automationData := make(map[string]interface{})
 
