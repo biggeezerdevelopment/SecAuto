@@ -279,6 +279,7 @@ func (cm *ConfigManager) getCacheKey(clientID, integrationName string) string {
 	return fmt.Sprintf("client:%s:integration:%s", clientID, integrationName)
 }
 
+
 func (cm *ConfigManager) getFromDatabase(clientID, integrationName string) (*DBClientIntegrationConfig, error) {
 	if cm.db == nil {
 		// If database is not available but we have a data path, try file-based storage
@@ -327,6 +328,17 @@ func (cm *ConfigManager) getFromDatabase(clientID, integrationName string) (*DBC
 	if err := cm.decryptConfig(encryptedConfig, &config); err != nil {
 		return nil, fmt.Errorf("failed to decrypt config: %v", err)
 	}
+	
+	// Log what we retrieved from database
+	cm.logger.Debug("Retrieved config from database", map[string]interface{}{
+		"client_id": config.ClientID,
+		"integration": config.IntegrationName,
+		"enabled": config.Enabled,
+		"has_config": config.Config != nil && len(config.Config) > 0,
+		"has_credentials": config.Credentials != nil && len(config.Credentials) > 0,
+		"config_keys": getMapKeys(config.Config),
+		"credential_keys": getMapKeys(config.Credentials),
+	})
 	
 	return &config, nil
 }
@@ -616,7 +628,7 @@ func (cm *ConfigManager) getFromFile(clientID, integrationName string) (*DBClien
 	}
 	
 	// Convert to database model
-	return &DBClientIntegrationConfig{
+	result := &DBClientIntegrationConfig{
 		ID:              fmt.Sprintf("%s_%s", clientID, integrationName), // Generate an ID
 		ClientID:        clientID,
 		IntegrationName: integrationName,
@@ -625,7 +637,21 @@ func (cm *ConfigManager) getFromFile(clientID, integrationName string) (*DBClien
 		Credentials:     legacyConfig.Credentials,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
-	}, nil
+	}
+	
+	// Log what we read from file
+	cm.logger.Debug("Retrieved config from file", map[string]interface{}{
+		"client_id": clientID,
+		"integration": integrationName,
+		"file_path": configFile,
+		"enabled": result.Enabled,
+		"has_config": result.Config != nil && len(result.Config) > 0,
+		"has_credentials": result.Credentials != nil && len(result.Credentials) > 0,
+		"config_keys": getMapKeys(result.Config),
+		"credential_keys": getMapKeys(result.Credentials),
+	})
+	
+	return result, nil
 }
 
 func isDirectory(path string) bool {

@@ -57,6 +57,7 @@ type LogEntry struct {
 	Variable   string                 `json:"variable,omitempty"`
 	Value      interface{}            `json:"value,omitempty"`
 	WebhookURL string                 `json:"webhook_url,omitempty"`
+	Extra      map[string]interface{} `json:"extra,omitempty"`
 	Attempt    int                    `json:"attempt,omitempty"`
 	RetryCount int                    `json:"retry_count,omitempty"`
 	Stats      map[string]interface{} `json:"stats,omitempty"`
@@ -194,8 +195,16 @@ func (sl *StructuredLogger) log(level LogLevel, message string, fields map[strin
 		Component: component,
 	}
 
+	// Initialize Extra map for additional fields
+	entry.Extra = make(map[string]interface{})
+	
 	// Add additional fields from the fields map
 	for key, value := range fields {
+		// Skip component as it's already handled
+		if key == "component" {
+			continue
+		}
+		
 		// Apply field truncation if configured
 		truncatedValue := sl.truncateField(value)
 
@@ -284,7 +293,15 @@ func (sl *StructuredLogger) log(level LogLevel, message string, fields map[strin
 			if ctx, ok := truncatedValue.(map[string]interface{}); ok {
 				entry.Context = ctx
 			}
+		default:
+			// Add any unmatched fields to Extra
+			entry.Extra[key] = truncatedValue
 		}
+	}
+	
+	// Clean up empty Extra map
+	if len(entry.Extra) == 0 {
+		entry.Extra = nil
 	}
 
 	// Marshal to JSON
