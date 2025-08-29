@@ -165,7 +165,7 @@ echo "Integration: {integration_name}"
         logger.info(f"Created activation script: {activation_script}")
     
     def use_integration(self, integration_name: str, function: str, 
-                       client_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+                       client_id: Optional[str] = None, config: Dict = None,**kwargs) -> Dict[str, Any]:
         """
         Execute an integration function using UV
         
@@ -182,20 +182,10 @@ echo "Integration: {integration_name}"
         context = {
             'function': function,
             'params': kwargs,
-            'client_id': client_id
+            'client_id': client_id,
+            'config': config
         }
-        
-        # Get client integration configuration from the Go server
-        if client_id:
-            try:
-                config, credentials = self._get_client_integration_config(integration_name, client_id)
-                context['config'] = config
-                context['credentials'] = credentials
-            except Exception as e:
-                logger.warning(f"Failed to get client integration config: {e}")
-                # Continue without config for backward compatibility
-                pass
-        
+         
         # Get integration script path
         script_path = self.scripts_dir / f"{integration_name}_integration.py"
         
@@ -351,7 +341,7 @@ echo "Integration: {integration_name}"
         
         for base_url in server_urls:
             try:
-                config_url = f"{base_url}/api/v1/clients/{client_id}/integrations/{integration_name}/config"
+                config_url = f"{base_url}/clients/{client_id}/integrations/{integration_name}/config"
                 
                 # Make request with a short timeout
                 response = requests.get(config_url, timeout=2)
