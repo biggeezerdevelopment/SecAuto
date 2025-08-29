@@ -140,12 +140,12 @@ func GetSpec() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var spec map[string]interface{}
 	if err := json.Unmarshal(specBytes, &spec); err != nil {
 		return nil, err
 	}
-	
+
 	return spec, nil
 }
 
@@ -155,8 +155,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 		"openapi": "3.0.3",
 		"info": map[string]interface{}{
 			"title":       "SecAuto Modular SOAR API",
-			"description": "A modular Security Orchestration, Automation, and Response (SOAR) platform API. This modular implementation provides core functionality for playbook execution, caching, and Redis list operations.",
-			"version":     "modular-1.0.0",
+			"description": "A modular Security Orchestration, Automation, and Response (SOAR) platform API with database-backed client management. This modular implementation provides core functionality for playbook execution, caching, multi-tenant client management, and Redis list operations.",
+			"version":     "modular-2.0.0",
 			"contact": map[string]interface{}{
 				"name":  "SecAuto Support",
 				"email": "support@secauto.com",
@@ -199,7 +199,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			},
 			{
 				"name":        "Clients",
-				"description": "Multi-tenant client management with isolated integrations",
+				"description": "Database-backed multi-tenant client management with ACID compliance, advanced search, and isolated integrations",
 			},
 		},
 		"paths": map[string]interface{}{
@@ -1974,7 +1974,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 				},
 				"post": map[string]interface{}{
 					"summary":     "Create Client",
-					"description": "Create a new client with isolated integrations",
+					"description": "Create a new client with isolated integrations (stored in PostgreSQL database)",
 					"tags":        []string{"Clients"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"requestBody": map[string]interface{}{
@@ -1989,7 +1989,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
-							"description": "Client created successfully",
+							"description": "Client created successfully in database",
 							"content": map[string]interface{}{
 								"application/json": map[string]interface{}{
 									"schema": map[string]interface{}{
@@ -2006,6 +2006,55 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 						},
 						"500": map[string]interface{}{
 							"description": "Internal server error during client creation",
+						},
+					},
+				},
+			},
+			"/clients/search": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Search Clients",
+					"description": "Search clients by name or metadata using database full-text search",
+					"tags":        []string{"Clients"},
+					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
+					"parameters": []map[string]interface{}{
+						{
+							"name":        "q",
+							"in":          "query",
+							"required":    true,
+							"description": "Search query (searches name, description, and metadata)",
+							"schema": map[string]interface{}{
+								"type": "string",
+							},
+						},
+						{
+							"name":        "limit",
+							"in":          "query",
+							"required":    false,
+							"description": "Maximum number of results to return (default: 50)",
+							"schema": map[string]interface{}{
+								"type":    "integer",
+								"default": 50,
+								"minimum": 1,
+								"maximum": 100,
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{
+							"description": "Search results retrieved successfully",
+							"content": map[string]interface{}{
+								"application/json": map[string]interface{}{
+									"schema": map[string]interface{}{
+										"$ref": "#/components/schemas/ClientSearchResponse",
+									},
+								},
+							},
+						},
+						"400": map[string]interface{}{
+							"description": "Invalid search query",
+						},
+						"401": map[string]interface{}{
+							"description": "Unauthorized - invalid or missing API key",
 						},
 					},
 				},
@@ -2448,8 +2497,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"example":     "incident_response",
 						},
 						"context": map[string]interface{}{
-							"type":        "object",
-							"description": "Context data for playbook execution",
+							"type":                 "object",
+							"description":          "Context data for playbook execution",
 							"additionalProperties": true,
 							"example": map[string]interface{}{
 								"incident": map[string]interface{}{
@@ -2602,8 +2651,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"description": "Whether the operation was successful",
 						},
 						"stats": map[string]interface{}{
-							"type":        "object",
-							"description": "Redis cache statistics",
+							"type":                 "object",
+							"description":          "Redis cache statistics",
 							"additionalProperties": true,
 						},
 						"message": map[string]interface{}{
@@ -2629,8 +2678,8 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"description": "Name of the Redis list",
 						},
 						"items": map[string]interface{}{
-							"type": "array",
-							"items": map[string]interface{}{},
+							"type":        "array",
+							"items":       map[string]interface{}{},
 							"description": "List items",
 						},
 						"count": map[string]interface{}{
@@ -2653,12 +2702,12 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"ListAddRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"items"},
 					"properties": map[string]interface{}{
 						"items": map[string]interface{}{
-							"type": "array",
-							"items": map[string]interface{}{},
+							"type":        "array",
+							"items":       map[string]interface{}{},
 							"description": "Items to add to the list",
 						},
 						"position": map[string]interface{}{
@@ -2670,12 +2719,12 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"ListRemoveRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"items"},
 					"properties": map[string]interface{}{
 						"items": map[string]interface{}{
-							"type": "array",
-							"items": map[string]interface{}{},
+							"type":        "array",
+							"items":       map[string]interface{}{},
 							"description": "Items to remove from the list",
 						},
 						"count": map[string]interface{}{
@@ -2686,7 +2735,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"Integration": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"id", "name", "type"},
 					"properties": map[string]interface{}{
 						"id": map[string]interface{}{
@@ -2962,7 +3011,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"JobSubmitRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"playbook"},
 					"properties": map[string]interface{}{
 						"playbook": map[string]interface{}{
@@ -3300,7 +3349,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"AutomationMetadata": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"name", "description", "version"},
 					"properties": map[string]interface{}{
 						"name": map[string]interface{}{
@@ -3361,7 +3410,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"AutomationParameter": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"name", "type"},
 					"properties": map[string]interface{}{
 						"name": map[string]interface{}{
@@ -3433,7 +3482,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"JobCreateRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"playbook"},
 					"properties": map[string]interface{}{
 						"playbook": map[string]interface{}{
@@ -3455,7 +3504,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"JobUpdateRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"status"},
 					"properties": map[string]interface{}{
 						"status": map[string]interface{}{
@@ -3661,7 +3710,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"ScheduleCreateRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"name", "cron_expr", "playbook"},
 					"properties": map[string]interface{}{
 						"name": map[string]interface{}{
@@ -3939,7 +3988,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"APIKeyCreateRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"name"},
 					"properties": map[string]interface{}{
 						"name": map[string]interface{}{
@@ -4129,7 +4178,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"ClientIntegrationConfigRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"name"},
 					"properties": map[string]interface{}{
 						"name": map[string]interface{}{
@@ -4213,7 +4262,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 					},
 				},
 				"IntegrationExecuteRequest": map[string]interface{}{
-					"type": "object",
+					"type":     "object",
 					"required": []string{"function"},
 					"properties": map[string]interface{}{
 						"function": map[string]interface{}{
@@ -4339,6 +4388,43 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 									"type":        "string",
 									"description": "Client description",
 								},
+								"active": map[string]interface{}{
+									"type":        "boolean",
+									"description": "Whether the client is active",
+								},
+								"api_keys": map[string]interface{}{
+									"type": "array",
+									"items": map[string]interface{}{
+										"type": "string",
+									},
+									"description": "Client API keys (partial for security)",
+								},
+								"encryption_key_id": map[string]interface{}{
+									"type":        "string",
+									"description": "Client-specific encryption key ID",
+								},
+								"rate_limits": map[string]interface{}{
+									"type": "object",
+									"properties": map[string]interface{}{
+										"requests_per_minute": map[string]interface{}{
+											"type":        "integer",
+											"description": "Rate limit requests per minute",
+										},
+										"burst_limit": map[string]interface{}{
+											"type":        "integer",
+											"description": "Rate limit burst capacity",
+										},
+										"enabled": map[string]interface{}{
+											"type":        "boolean",
+											"description": "Whether rate limiting is enabled",
+										},
+									},
+									"description": "Client rate limiting configuration",
+								},
+								"metadata": map[string]interface{}{
+									"type":        "object",
+									"description": "Client-specific metadata (searchable)",
+								},
 								"created_at": map[string]interface{}{
 									"type":        "string",
 									"format":      "date-time",
@@ -4349,13 +4435,17 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 									"format":      "date-time",
 									"description": "Client last update timestamp",
 								},
-								"status": map[string]interface{}{
+								"last_accessed_at": map[string]interface{}{
 									"type":        "string",
-									"description": "Client status",
-									"enum":        []string{"active", "inactive", "suspended"},
+									"format":      "date-time",
+									"description": "Client last access timestamp",
+								},
+								"integration_count": map[string]interface{}{
+									"type":        "integer",
+									"description": "Number of configured integrations",
 								},
 							},
-							"description": "Client information",
+							"description": "Database-backed client information with full details",
 						},
 						"timestamp": map[string]interface{}{
 							"type":        "string",
@@ -4455,6 +4545,142 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 							"description": "Response timestamp",
 						},
 					},
+				},
+				"ClientCreateRequest": map[string]interface{}{
+					"type":     "object",
+					"required": []string{"name"},
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{
+							"type":        "string",
+							"description": "Client name (required)",
+							"minLength":   1,
+							"maxLength":   255,
+						},
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "Client description (optional)",
+							"maxLength":   1000,
+						},
+						"metadata": map[string]interface{}{
+							"type":        "object",
+							"description": "Client-specific metadata (optional, searchable)",
+						},
+					},
+				},
+				"ClientUpdateRequest": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{
+							"type":        "string",
+							"description": "Updated client name",
+							"minLength":   1,
+							"maxLength":   255,
+						},
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "Updated client description",
+							"maxLength":   1000,
+						},
+						"active": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether the client should be active",
+						},
+						"metadata": map[string]interface{}{
+							"type":        "object",
+							"description": "Updated client metadata (searchable)",
+						},
+						"rate_limits": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"requests_per_minute": map[string]interface{}{
+									"type":        "integer",
+									"description": "Rate limit requests per minute",
+									"minimum":     1,
+									"maximum":     10000,
+								},
+								"burst_limit": map[string]interface{}{
+									"type":        "integer",
+									"description": "Rate limit burst capacity",
+									"minimum":     1,
+									"maximum":     1000,
+								},
+								"enabled": map[string]interface{}{
+									"type":        "boolean",
+									"description": "Whether rate limiting is enabled",
+								},
+							},
+							"description": "Updated rate limiting configuration",
+						},
+					},
+				},
+				"ClientSearchResponse": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"success": map[string]interface{}{
+							"type":        "boolean",
+							"description": "Whether search was successful",
+						},
+						"message": map[string]interface{}{
+							"type":        "string",
+							"description": "Response message",
+						},
+						"clients": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"id": map[string]interface{}{
+										"type":        "string",
+										"description": "Client unique identifier",
+									},
+									"name": map[string]interface{}{
+										"type":        "string",
+										"description": "Client name",
+									},
+									"description": map[string]interface{}{
+										"type":        "string",
+										"description": "Client description",
+									},
+									"active": map[string]interface{}{
+										"type":        "boolean",
+										"description": "Whether the client is active",
+									},
+									"metadata": map[string]interface{}{
+										"type":        "object",
+										"description": "Client metadata that matched search",
+									},
+									"created_at": map[string]interface{}{
+										"type":        "string",
+										"format":      "date-time",
+										"description": "Client creation timestamp",
+									},
+									"integration_count": map[string]interface{}{
+										"type":        "integer",
+										"description": "Number of configured integrations",
+									},
+								},
+							},
+							"description": "Search results with matching clients",
+						},
+						"query": map[string]interface{}{
+							"type":        "string",
+							"description": "Original search query",
+						},
+						"count": map[string]interface{}{
+							"type":        "integer",
+							"description": "Number of matching clients found",
+						},
+						"limit": map[string]interface{}{
+							"type":        "integer",
+							"description": "Maximum results requested",
+						},
+						"timestamp": map[string]interface{}{
+							"type":        "string",
+							"format":      "date-time",
+							"description": "Response timestamp",
+						},
+					},
+					"required": []string{"success", "message", "clients", "query", "count", "limit", "timestamp"},
 				},
 			},
 		},
