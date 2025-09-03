@@ -199,7 +199,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			},
 			{
 				"name":        "Clients",
-				"description": "Database-backed multi-tenant client management with ACID compliance, advanced search, and isolated integrations",
+				"description": "Database-backed multi-tenant client management with ACID compliance, advanced search, and isolated integrations. Note: Client API keys can only access their own integration endpoints, not global client management.",
 			},
 		},
 		"paths": map[string]interface{}{
@@ -1953,7 +1953,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			"/clients": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "List Clients",
-					"description": "Get all clients in the system",
+					"description": "Get all clients in the system (Admin API keys only - client API keys cannot access this endpoint)",
 					"tags":        []string{"Clients"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"responses": map[string]interface{}{
@@ -1974,7 +1974,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 				},
 				"post": map[string]interface{}{
 					"summary":     "Create Client",
-					"description": "Create a new client with isolated integrations (stored in PostgreSQL database)",
+					"description": "Create a new client with isolated integrations (Admin API keys only - stored in PostgreSQL database)",
 					"tags":        []string{"Clients"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"requestBody": map[string]interface{}{
@@ -2013,7 +2013,7 @@ func readOpenAPISpec(serverPort string) ([]byte, error) {
 			"/clients/search": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "Search Clients",
-					"description": "Search clients by name or metadata using database full-text search",
+					"description": "Search clients by name or metadata using database full-text search (Admin API keys only)",
 					"tags":        []string{"Clients"},
 					"security":    []map[string]interface{}{{"ApiKeyAuth": []string{}}},
 					"parameters": []map[string]interface{}{

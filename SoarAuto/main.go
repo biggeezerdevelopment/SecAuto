@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -37,6 +38,13 @@ import (
 	"SoarAuto/pkg/validator"
 
 	_ "github.com/lib/pq"
+)
+
+// Context key type for request context values
+type contextKey string
+
+const (
+	clientContextKey contextKey = "client"
 )
 
 // Helper function for min of two integers
@@ -417,25 +425,65 @@ func (s *SecAutoServer) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if !s.apiKeyManager.IsValidKey(apiKey) {
-			err := errors.NewErrorBuilder(errors.ErrCodeAuthInvalid, "Invalid API key").
-				WithContext("api_key_prefix", apiKey[:8]).
-				Build()
+		// Check if it's a valid main API key or client API key
+		isValidMainKey := s.apiKeyManager.IsValidKey(apiKey)
+		var authenticatedClient *clients.Client
 
-			// Log authentication failure
-			s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
+		if !isValidMainKey {
+			// Try to authenticate as client API key
+			client, err := s.clientManager.GetClientByAPIKey(apiKey)
+			if err != nil {
+				err := errors.NewErrorBuilder(errors.ErrCodeAuthInvalid, "Invalid API key").
+					WithContext("api_key_prefix", apiKey[:8]).
+					Build()
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(err.HTTPStatusCode())
-			json.NewEncoder(w).Encode(err.ToAPIResponse())
-			return
+				// Log authentication failure
+				s.auditLogger.LogAuthenticationEvent(false, "", "", r, err)
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(err.HTTPStatusCode())
+				json.NewEncoder(w).Encode(err.ToAPIResponse())
+				return
+			}
+			authenticatedClient = client
+
+			// Check if client API key is trying to access restricted endpoints
+			if s.isClientRestrictedEndpoint(r.URL.Path) {
+				err := errors.NewErrorBuilder(errors.ErrCodeAuthPermission, "Client API keys cannot access global client management endpoints").
+					WithContext("api_key_prefix", apiKey[:8]).
+					WithContext("endpoint", r.URL.Path).
+					WithContext("client_id", client.ID).
+					Build()
+
+				// Log authorization failure
+				s.auditLogger.LogAuthenticationEvent(false, apiKey[:8], client.ID, r, err)
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(err.HTTPStatusCode())
+				json.NewEncoder(w).Encode(err.ToAPIResponse())
+				return
+			}
 		}
 
 		// Update last used timestamp
-		s.apiKeyManager.UpdateLastUsed(apiKey)
+		if isValidMainKey {
+			s.apiKeyManager.UpdateLastUsed(apiKey)
+		}
+		// Note: Client last accessed time is updated in GetClientByAPIKey
+
+		// Add client context to request if authenticated via client API key
+		if authenticatedClient != nil {
+			// Store client info in request context for later use
+			ctx := context.WithValue(r.Context(), clientContextKey, authenticatedClient)
+			r = r.WithContext(ctx)
+		}
 
 		// Log successful authentication
-		s.auditLogger.LogAuthenticationEvent(true, apiKey[:8], "", r, nil)
+		clientID := ""
+		if authenticatedClient != nil {
+			clientID = authenticatedClient.ID
+		}
+		s.auditLogger.LogAuthenticationEvent(true, apiKey[:8], clientID, r, nil)
 
 		// Call the next handler
 		next(w, r)
@@ -450,6 +498,35 @@ func (s *SecAutoServer) middleware(next http.HandlerFunc) http.HandlerFunc {
 // publicMiddleware applies only CORS middleware (for health/docs endpoints)
 func (s *SecAutoServer) publicMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return s.corsMiddleware(next)
+}
+
+// isClientRestrictedEndpoint checks if the endpoint is restricted for client API keys
+func (s *SecAutoServer) isClientRestrictedEndpoint(path string) bool {
+	// Client API keys are restricted from global client management endpoints
+	restrictedPrefixes := []string{
+		"/clients",        // GET /clients (list all)
+		"/clients/search", // GET /clients/search
+		"/api-keys",       // API key management
+		"/cluster",        // Cluster management
+		"/schedules",      // Schedule management
+		"/schedule/",      // Individual schedule operations
+		"/jobs",           // Global job management
+		"/job/",           // Individual job operations
+	}
+
+	// Allow client-specific integration endpoints
+	if strings.HasPrefix(path, "/clients/") && strings.Contains(path, "/integrations") {
+		return false // Allow client integration endpoints
+	}
+
+	// Check against restricted prefixes
+	for _, prefix := range restrictedPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ExecutePlaybook implements the JobExecutor interface for scheduled jobs
